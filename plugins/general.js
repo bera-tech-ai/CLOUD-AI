@@ -182,28 +182,58 @@ const SUBMENUS = {
       `${p}rps — Rock Paper Scissors`,
       `${p}trivia — Quiz Game`,
       `${p}riddle — Riddles`,
-      `${p}hangman — Hangman Game`,
-      `${p}math — Math Challenge`,
-      '',
-      `*😂 FUN*`,
-      `${p}joke — Random Joke`,
-      `${p}fact — Fun Fact`,
-      `${p}meme — Random Meme`,
+      `${p}8ball — Magic 8-Ball`,
       `${p}coinflip — Flip a Coin`,
       `${p}dice — Roll Dice`,
       `${p}truth — Truth Question`,
       `${p}dare — Dare Challenge`,
       '',
+      `*😂 FUN*`,
+      `${p}joke — Random Joke`,
+      `${p}fact — Fun Fact`,
+      `${p}meme — Random Meme`,
+      `${p}flirt — Flirt Line`,
+      `${p}pickup — Pickup Line`,
+      `${p}compliment — Compliment Someone`,
+      `${p}roast — Roast Someone`,
+      `${p}rizz — Rizz Line`,
+      `${p}advice — Life Advice`,
+      `${p}lovemeter — Love Meter`,
+      '',
       `*🎌 ANIME*`,
       `${p}waifu — Random Waifu`,
       `${p}neko — Random Neko`,
-      `${p}anime-gif — Anime GIF`,
+      `${p}hug / ${p}slap / ${p}kiss`,
       `${p}ship — Ship Two Users`,
     ].join('\n'),
     buttons: [
-      { text: `${p}meme`, id: `${p}meme` },
+      { text: `${p}8ball <question>`, id: `${p}8ball Will I be rich?` },
+      { text: `${p}flirt`, id: `${p}flirt` },
       { text: `${p}trivia`, id: `${p}trivia` },
-      { text: `${p}waifu`, id: `${p}waifu` },
+    ],
+  },
+  info: {
+    emoji: '🌍',
+    title: 'INFO & LOOKUP',
+    text: [
+      `╔═══════════════════════════╗`,
+      `║  🌍  *INFO & LOOKUP*       ║`,
+      `╚═══════════════════════════╝`,
+      '',
+      `${p}currency <amt> <FROM> to <TO>`,
+      `${p}country <name>`,
+      `${p}pokedex <pokemon>`,
+      `${p}horoscope <zodiac sign>`,
+      `${p}news [category]`,
+      `${p}movie <title>`,
+      `${p}bible — Daily Bible Verse`,
+      `${p}npm <package>`,
+      `${p}github <username>`,
+    ].join('\n'),
+    buttons: [
+      { text: `${p}currency 100 USD to KES`, id: `${p}currency 100 USD to KES` },
+      { text: `${p}pokedex pikachu`, id: `${p}pokedex pikachu` },
+      { text: `${p}news sports`, id: `${p}news sports` },
     ],
   },
   group: {
@@ -225,19 +255,21 @@ const SUBMENUS = {
       `${p}hidetag <msg> — Silent Tag All`,
       '',
       `*📋 INFO*`,
-      `${p}gclink — Get Group Link`,
-      `${p}gcinfo — Group Information`,
-      `${p}members — Member List Count`,
+      `${p}gclink — Get Group Invite Link`,
+      `${p}gcinfo — Detailed Group Info`,
+      `${p}gcmembers — Full Member List`,
+      `${p}gcpp — Group Profile Picture`,
       '',
       `*⚙️ SETTINGS*`,
-      `${p}setgcname <name>`,
-      `${p}setgcdesc <desc>`,
-      `${p}antilink on/off`,
+      `${p}setgcname <name> — Rename Group`,
+      `${p}setgcdesc <desc> — Set Description`,
+      `${p}antilink on/off — Anti-Link Filter`,
+      `${p}gcleave — Bot Leaves Group`,
     ].join('\n'),
     buttons: [
       { text: `${p}tagall`, id: `${p}tagall` },
+      { text: `${p}gcmembers`, id: `${p}gcmembers` },
       { text: `${p}gcinfo`, id: `${p}gcinfo` },
-      { text: `${p}gclink`, id: `${p}gclink` },
     ],
   },
   owner: {
@@ -341,7 +373,7 @@ const general = async (m, conn) => {
     const uptime = formatUptime(Date.now() - BOT_START);
     const timeNow = t.format('hh:mm:ss a');
     const dateToday = t.format('DD/MM/YYYY');
-    const PLUGINS = 133;
+    const PLUGINS = 160;
 
     // invisible separator (WhatsApp "read more" collapse effect)
     const INV = '‎'.repeat(200);
@@ -378,23 +410,31 @@ ${cat('🔄 𝘾𝙊𝙉𝙑𝙀𝙍𝙏𝙀𝙍', ['sticker','toimg','toaudio',
 ${cat('📥 𝘿𝙊𝙒𝙉𝙇𝙊𝘼𝘿𝙀𝙍', ['ytmp3','ytmp4','play','tiktok','ig','fb','twitter','spotify','pinterest','capcut','mediafire','terabox','gdrive','gitclone','aio'])}
 
 
-${cat('🛠️ 𝙏𝙊𝙊𝙇𝙎', ['weather','lyrics','qr','screenshot','removebg','tts','stalk','pp','carbon','password','shortlink','tourl','encrypt','decrypt'])}
+${cat('🛠️ 𝙏𝙊𝙊𝙇𝙎', ['weather','lyrics','qr','screenshot','removebg','tts','stalk','pp','carbon','password','shortlink','tourl','encrypt','decrypt','time'])}
 
 
-${cat('💻 𝙏𝙀𝘾𝙃', ['iplookup','dns','hash','uuid','timestamp','httpcode','jsonfmt','urlencode','urldecode','subnet'])}
+${cat('💻 𝙏𝙀𝘾𝙃', ['iplookup','dns','hash','uuid','timestamp','httpcode','jsonfmt','urlencode','urldecode','subnet','calc'])}
+
+
+${cat('🌍 𝙄𝙉𝙁𝙊', ['currency','country','pokedex','horoscope','news','movie','bible','npm','github'])}
+
+
 ${cat('🚀 𝘽𝙀𝙍𝘼𝙃𝙊𝙎𝙏', ['berahost','deploy','deploystatus','mydeployments'])}
 
 
-${cat('🔍 𝙎𝙀𝘼𝙍𝘾𝙃', ['google','wikipedia','define','github','lyrics','yts'])}
+${cat('🔍 𝙎𝙀𝘼𝙍𝘾𝙃', ['google','wikipedia','define','yts','anime','manga','ringtone'])}
 
 
-${cat('🎮 𝙂𝘼𝙈𝙀𝙎', ['rps','trivia','riddle','dice','coinflip','truth','dare','joke','fact','meme','lovemeter'])}
+${cat('🎮 𝙁𝙐𝙉 & 𝙂𝘼𝙈𝙀𝙎', ['rps','trivia','riddle','8ball','dice','coinflip','truth','dare','joke','fact','meme','flirt','pickup','compliment','roast','rizz','advice','lovemeter'])}
 
 
-${cat('👥 𝙂𝙍𝙊𝙐𝙋', ['add','kick','promote','demote','mute','unmute','tagall','everyone','hidetag','gclink','gcinfo','gcname','gcdesc'])}
+${cat('👥 𝙂𝙍𝙊𝙐𝙋', ['add','kick','promote','demote','mute','unmute','tagall','everyone','hidetag','gclink','gcinfo','gcmembers','gcpp','gcname','gcdesc'])}
 
 
 ${cat('👑 𝙊𝙒𝙉𝙀𝙍', ['broadcast','block','unblock','setname','setbio','setpp','restart','eval','setmode','setprefix','settings','setautoread','setonline','setstatusseen','vv','whois'])}
+
+
+${cat('🎌 𝘼𝙉𝙄𝙈𝙀', ['animelist','ship','lovemeter','waifuim','waifu','neko','hug','slap','kiss','punch','pat'])}
 
 
 ${cat('🎌 𝘼𝙉𝙄𝙈𝙀', ['animelist','ship','lovemeter','waifuim','waifu','neko','hug','slap','kiss','punch','pat'])}

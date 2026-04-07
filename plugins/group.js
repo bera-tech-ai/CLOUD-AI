@@ -260,6 +260,58 @@ const group = async (m, conn) => {
     }
     return;
   }
+
+  // ─── GROUP MEMBERS LIST ───
+  if (['gcmembers', 'members', 'listmembers', 'memberlist', 'groupmembers'].includes(cmd)) {
+    await m.React('👥');
+    try {
+      const admins = participants.filter(p => p.admin);
+      const regulars = participants.filter(p => !p.admin);
+      const adminList = admins.map(p => `👑 @${p.id.split('@')[0]}`).join('\n') || 'None';
+      const memberList = regulars.slice(0, 50).map(p => `👤 @${p.id.split('@')[0]}`).join('\n');
+      const mentions = participants.map(p => p.id);
+      const extra = regulars.length > 50 ? `\n_...and ${regulars.length - 50} more members_` : '';
+
+      await conn.sendMessage(m.from, {
+        text: `👥 *Group Members* — ${groupInfo?.subject || 'Group'}\n━━━━━━━━━━━━━━━━━━━━━\n\n👑 *Admins (${admins.length})*\n${adminList}\n\n👤 *Members (${regulars.length})*\n${memberList}${extra}\n\n📊 *Total:* ${participants.length} members\n\n> ${config.BOT_NAME}`,
+        mentions,
+      }, { quoted: { key: m.key, message: m.message } });
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Failed to get members: ${err.message}`);
+    }
+    return;
+  }
+
+  // ─── GROUP PROFILE PICTURE ───
+  if (['gcpp', 'grouppp', 'gcpic', 'grouppic', 'gcphoto'].includes(cmd)) {
+    await m.React('🖼️');
+    try {
+      const ppUrl = await conn.profilePictureUrl(m.from, 'image');
+      await conn.sendMessage(m.from, {
+        image: { url: ppUrl },
+        caption: `🖼️ *Group Profile Picture*\n📛 ${groupInfo?.subject || 'Group'}\n👥 ${participants.length} members\n\n> ${config.BOT_NAME}`,
+      }, { quoted: { key: m.key, message: m.message } });
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      if (err.message?.includes('404') || err.message?.includes('not-authorized')) {
+        await m.reply('❌ This group has no profile picture set.');
+      } else {
+        await m.reply(`❌ Failed to get group picture: ${err.message}`);
+      }
+    }
+    return;
+  }
+
+  // ─── LEAVE GROUP (owner only) ───
+  if (['gcleave', 'leavegroup', 'leave'].includes(cmd)) {
+    if (m.sender !== config.OWNER_NUMBER + '@s.whatsapp.net') return m.reply('❌ Owner only command!');
+    await m.reply(`👋 Leaving this group...\n\n> ${config.BOT_NAME}`);
+    await conn.groupLeave(m.from);
+    return;
+  }
 };
 
 export default group;

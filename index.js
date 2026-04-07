@@ -40,6 +40,8 @@ import searchPlugin from './plugins/search.js';
 import gamesPlugin from './plugins/games.js';
 import settingsPlugin from './plugins/settings.js';
 import techPlugin from './plugins/tech.js';
+import funPlugin from './plugins/fun.js';
+import infoPlugin from './plugins/info.js';
 import { onGroupUpdate } from './plugins/welcome.js';
 import { handleCall } from './plugins/anticall.js';
 
@@ -47,7 +49,7 @@ const ALL_PLUGINS = [
   generalPlugin, aiPlugin, imaginePlugin, animePlugin,
   downloaderPlugin, converterPlugin, toolsPlugin, extraPlugin,
   groupPlugin, ownerPlugin, searchPlugin, gamesPlugin, settingsPlugin,
-  techPlugin,
+  techPlugin, funPlugin, infoPlugin,
 ];
 
 // ─── Setup ───
@@ -82,6 +84,14 @@ console.warn = suppress(_origWarn);
 
 // ─── In-memory store (auto-handles LID → JID resolution) ───
 const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+
+// ─── Global crash guard — prevents any internal Baileys error from killing the process ───
+process.on('uncaughtException', (err) => {
+  _origLog(chalk.red(`⚠️ Uncaught Exception (handled): ${err.message}`));
+});
+process.on('unhandledRejection', (reason) => {
+  _origLog(chalk.red(`⚠️ Unhandled Rejection (handled): ${reason?.message || reason}`));
+});
 
 // ─── Banner ───
 _origLog(orange(`
@@ -192,14 +202,14 @@ async function connectToWhatsApp() {
         fs.rmSync(sessionDir, { recursive: true, force: true });
         process.exit(1);
       } else if (code === 440 || code === 408 || code === 503) {
-        // 440 = stream error / conflict — use longer backoff to avoid loop
+        // 440 = stream error / conflict — exponential backoff
         reconnectAttempts++;
         const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 60000);
-        _origLog(chalk.yellow(`🔌 Disconnected (${code} ${reason}). Attempt ${reconnectAttempts} — reconnecting in ${Math.round(delay/1000)}s...`));
-        setTimeout(() => { reconnectAttempts = 0; connectToWhatsApp(); }, delay);
+        _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
+        setTimeout(() => connectToWhatsApp(), delay);
       } else {
         reconnectAttempts++;
-        const delay = Math.min(3000 * reconnectAttempts, 30000);
+        const delay = Math.min(4000 * reconnectAttempts, 30000);
         _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay/1000)}s...`));
         setTimeout(() => connectToWhatsApp(), delay);
       }
