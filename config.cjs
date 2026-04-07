@@ -19,7 +19,7 @@ const config = {
   VERSION:           "3.2.0",
   TIMEZONE:          "Africa/Nairobi",
   BERAHOST_API:      "https://bot-deployment-platform.replit.app",
-  BERAHOST_KEY:      "bh_7887ec5128c7db3d0f775ba52f5ed1a134c8c68d3adc77f9",
+  BERAHOST_KEY:      "bh_fff4fe54c28760d78f587eca840f9d29ffc707eba0c9e3d1",
 
   // ── Status automation ──
   AUTO_STATUS_SEEN:    process.env.AUTO_STATUS_SEEN  !== undefined ? process.env.AUTO_STATUS_SEEN  === "true" : true,
