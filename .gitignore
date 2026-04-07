@@ -7,3 +7,4 @@ state.json
 auth_info_baileys/
 auth_info_multi/
 store.json
+bin/yt-dlp
