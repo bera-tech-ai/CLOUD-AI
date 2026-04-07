@@ -278,22 +278,33 @@ async function connectToWhatsApp() {
 
     for (let msg of messages) {
       try {
-        // Resolve @lid JID using store contacts before processing
-        if (msg.key?.remoteJid?.endsWith('@lid')) {
-          const lidJid = msg.key.remoteJid;
-          let resolved = lidMap.get(lidJid);
+        // ─── Resolve @lid JIDs everywhere in the message key ───
+        const tryResolveLid = (lid) => {
+          if (!lid || !lid.endsWith('@lid')) return lid;
+          let resolved = lidMap.get(lid);
           if (!resolved) {
-            // Try store contacts
             const contacts = Object.values(store?.contacts || {});
-            const match = contacts.find(c => (c.lid || c.lidJid) === lidJid);
-            if (match?.id) {
-              resolved = match.id;
-              lidMap.set(lidJid, resolved);
-            }
+            const match = contacts.find(c => (c.lid || c.lidJid) === lid);
+            if (match?.id) { resolved = match.id; lidMap.set(lid, resolved); }
           }
-          if (resolved && !resolved.endsWith('@lid')) {
+          return (resolved && !resolved.endsWith('@lid')) ? resolved : lid;
+        };
+
+        // Resolve remoteJid (for DM @lid chats)
+        if (msg.key?.remoteJid?.endsWith('@lid')) {
+          const resolved = tryResolveLid(msg.key.remoteJid);
+          if (resolved !== msg.key.remoteJid) {
             msg = { ...msg, key: { ...msg.key, remoteJid: resolved } };
-            _origLog(`[LID RESOLVED] ${lidJid} → ${resolved}`);
+            _origLog(`[LID resolved] remoteJid ${msg.key.remoteJid} → ${resolved}`);
+          }
+        }
+
+        // Resolve participant (for group @lid senders)
+        if (msg.key?.participant?.endsWith('@lid')) {
+          const resolved = tryResolveLid(msg.key.participant);
+          if (resolved !== msg.key.participant) {
+            msg = { ...msg, key: { ...msg.key, participant: resolved } };
+            _origLog(`[LID resolved] participant → ${resolved}`);
           }
         }
 
