@@ -53,6 +53,8 @@ const SFW_TYPES = {
   stare: { api: 'nekos', type: 'stare', emoji: '👁️' },
   sleep: { api: 'nekos', type: 'sleep', emoji: '😴' },
   thumbsup: { api: 'nekos', type: 'thumbsup', emoji: '👍' },
+  kiss: { api: 'nekos', type: 'kiss', emoji: '💋' },
+  punch: { api: 'nekos', type: 'punch', emoji: '👊' },
 };
 
 const anime = async (m, conn) => {
@@ -133,6 +135,8 @@ const anime = async (m, conn) => {
     bite: `😤 *${senderName}* bites ${target ? targetName : 'someone'}!`,
     lick: `👅 *${senderName}* licks ${target ? targetName : 'someone'}!`,
     bonk: `🔨 *${senderName}* bonks ${target ? targetName : 'someone'}!`,
+    kiss: `💋 *${senderName}* kisses ${target ? targetName : 'someone'}!`,
+    punch: `👊 *${senderName}* punches ${target ? targetName : 'someone'}!`,
     highfive: `✋ *${senderName}* high fives ${target ? targetName : 'someone'}!`,
     shoot: `🔫 *${senderName}* shoots ${target ? targetName : 'someone'}!`,
     glomp: `🤗 *${senderName}* glomps ${target ? targetName : 'someone'}!`,

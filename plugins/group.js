@@ -9,7 +9,7 @@ const group = async (m, conn) => {
   const q = args.slice(1).join(' ');
 
   if (!m.isGroup) {
-    if (['kick','add','promote','demote','mute','unmute','tagall','tag','gclink','revoke','setgcname','setgcdesc','setgcpp','gcinfo','gcpp'].includes(cmd)) {
+    if (['kick','add','promote','demote','mute','unmute','tagall','hidetag','everyone','tag','gclink','revoke','setgcname','setgcdesc','setgcpp','gcinfo','gcpp'].includes(cmd)) {
       return m.reply('❌ This command only works in groups!');
     }
     return;
@@ -147,6 +147,23 @@ const group = async (m, conn) => {
     } catch (err) {
       await m.React('❌');
       await m.reply(`❌ Tag all failed: ${err.message}`);
+    }
+    return;
+  }
+
+  // ─── HIDETAG (ghost mention — tags all but hides mentions) ───
+  if (['hidetag', 'htag', 'ghosttag', 'htagall'].includes(cmd)) {
+    if (!isAdmin) return m.reply('❌ Admin only command!');
+    await m.React('👻');
+    try {
+      const mentions = participants.map(p => p.id);
+      const text = q || '👻 *Ghost Tag — You have been notified!*';
+      // Send with mentions array but without @mentions in text = hidden/ghost tag
+      await conn.sendMessage(m.from, { text, mentions }, { quoted: { key: m.key, message: m.message } });
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Hidetag failed: ${err.message}`);
     }
     return;
   }

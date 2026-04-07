@@ -375,7 +375,7 @@ ${cat('🎨 𝙸𝙼𝘼𝙂𝙀 𝙶𝙀𝙉', ['imagine','flux','dalle','sdxl'
 ${cat('🔄 𝘾𝙊𝙉𝙑𝙀𝙍𝙏𝙀𝙍', ['sticker','toimg','toaudio','toptt','vv','base64','binary','hex','morse','reverse'])}
 
 
-${cat('📥 𝘿𝙊𝙒𝙉𝙇𝙊𝘼𝘿𝙀𝙍', ['ytmp3','ytmp4','tiktok','ig','fb','twitter','spotify','gdrive','gitclone','capcut','mediafire','terabox','aio','play'])}
+${cat('📥 𝘿𝙊𝙒𝙉𝙇𝙊𝘼𝘿𝙀𝙍', ['ytmp3','ytmp4','play','tiktok','ig','fb','twitter','spotify','pinterest','capcut','mediafire','terabox','gdrive','gitclone','aio'])}
 
 
 ${cat('🛠️ 𝙏𝙊𝙊𝙇𝙎', ['weather','lyrics','qr','screenshot','removebg','tts','stalk','pp','carbon','password','shortlink','tourl','encrypt','decrypt'])}

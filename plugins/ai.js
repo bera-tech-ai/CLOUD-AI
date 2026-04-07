@@ -6,7 +6,7 @@ const p = config.PREFIX;
 
 // ─── Model map: cmd → Pollinations model name ───────────────────────────────
 const MODEL_MAP = {
-  ai: 'openai',         giftedai: 'openai',
+  ai: 'openai',         giftedai: 'openai',      chatai: 'openai',
   gpt: 'openai',        chatgpt: 'openai',       gpt4: 'openai-large',
   gpt4o: 'openai-large', 'gpt4o-mini': 'openai',
   gemini: 'openai-large',
@@ -25,7 +25,7 @@ const MODEL_MAP = {
 
 // ─── Display labels ───────────────────────────────────────────────────────────
 const AI_LABEL = {
-  ai: '🤖 CLOUD AI',      giftedai: '🤖 CLOUD AI',
+  ai: '🤖 CLOUD AI',      giftedai: '🤖 CLOUD AI',   chatai: '🤖 CLOUD AI',
   gpt: '🧠 GPT-3.5',      chatgpt: '🧠 GPT-3.5',     gpt4: '🧠 GPT-4',
   gpt4o: '🧠 GPT-4o',     'gpt4o-mini': '🧠 GPT-4o Mini',
   gemini: '✨ Gemini',

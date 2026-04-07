@@ -322,8 +322,25 @@ ${envList}
       await m.React('✅');
     } catch (err) {
       await m.React('❌');
-      const errMsg = err.response?.data?.message || err.response?.data?.error || err.message;
-      await m.reply(`❌ *Deployment Failed*\n\n${errMsg}\n\n> ${config.BOT_NAME}`);
+      const raw = err.response?.data;
+      const errMsg = (typeof raw === 'object' ? raw?.message || raw?.error : raw) || err.message;
+      const isScope = String(errMsg).toLowerCase().includes('scope') || String(errMsg).toLowerCase().includes('write');
+      await m.reply(
+`❌ *Deployment Failed*
+━━━━━━━━━━━━━━━━━━━━━
+
+*Error:* ${errMsg}
+${isScope ? `
+⚠️ *API Key Permission Issue*
+Your BERAHOST API key doesn't have *write* scope.
+
+*How to fix:*
+1. Go to your BERAHOST platform
+2. Navigate to *API Keys* settings
+3. Regenerate or create a new key with *write* scope enabled
+4. Update the key in config.cjs as \`BERAHOST_KEY\`
+` : ''}
+> ${config.BOT_NAME}`);
     }
     return;
   }

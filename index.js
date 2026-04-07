@@ -179,18 +179,29 @@ async function connectToWhatsApp() {
   store.bind(conn.ev);
 
   // ─── Connection Updates ───
+  let reconnectAttempts = 0;
   conn.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
-      if (code === DisconnectReason.loggedOut) {
+      const reason = lastDisconnect?.error?.output?.payload?.error || '';
+
+      if (code === DisconnectReason.loggedOut || code === 401) {
         _origLog(chalk.red('🚪 Logged out. Clearing session...'));
         fs.rmSync(sessionDir, { recursive: true, force: true });
         process.exit(1);
+      } else if (code === 440 || code === 408 || code === 503) {
+        // 440 = stream error / conflict — use longer backoff to avoid loop
+        reconnectAttempts++;
+        const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 60000);
+        _origLog(chalk.yellow(`🔌 Disconnected (${code} ${reason}). Attempt ${reconnectAttempts} — reconnecting in ${Math.round(delay/1000)}s...`));
+        setTimeout(() => { reconnectAttempts = 0; connectToWhatsApp(); }, delay);
       } else {
-        _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in 5s...`));
-        setTimeout(() => connectToWhatsApp(), 5000);
+        reconnectAttempts++;
+        const delay = Math.min(3000 * reconnectAttempts, 30000);
+        _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay/1000)}s...`));
+        setTimeout(() => connectToWhatsApp(), delay);
       }
     }
 
