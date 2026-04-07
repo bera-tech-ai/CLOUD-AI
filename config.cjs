@@ -24,7 +24,7 @@ const config = {
   // ── Status automation ──
   AUTO_STATUS_SEEN:    process.env.AUTO_STATUS_SEEN  !== undefined ? process.env.AUTO_STATUS_SEEN  === "true" : true,
   AUTO_STATUS_REACT:   process.env.AUTO_STATUS_REACT !== undefined ? process.env.AUTO_STATUS_REACT === "true" : true,
-  AUTO_STATUS_REPLY:   process.env.AUTO_STATUS_REPLY !== undefined ? process.env.AUTO_STATUS_REPLY === "true" : false,
+  AUTO_STATUS_REPLY:   process.env.AUTO_STATUS_REPLY !== undefined ? process.env.AUTO_STATUS_REPLY === "false" : false,
   STATUS_READ_MSG:     process.env.STATUS_READ_MSG || "✅ Status seen by CLOUD AI",
 
   // ── Message automation ──
