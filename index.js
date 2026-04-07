@@ -13,6 +13,7 @@ import {
 } from '@whiskeysockets/baileys';
 import { Handler, Callupdate } from './data/handler.js';
 import { lidMap } from './lib/Serializer.js';
+import { ensureYtDlp } from './lib/ytdlp.js';
 
 import express from 'express';
 import pino from 'pino';
@@ -414,4 +415,10 @@ app.get('/', (req, res) => res.json({
 app.listen(PORT, () => _origLog(lime(`🌐 Keep-alive server: port ${PORT}`)));
 
 // ─── Start ───
-connectToWhatsApp();
+// Ensure yt-dlp binary exists before connecting (downloads automatically if missing)
+ensureYtDlp()
+  .then(() => connectToWhatsApp())
+  .catch((err) => {
+    _origLog(chalk.yellow(`⚠️  yt-dlp unavailable: ${err.message} — download commands disabled`));
+    connectToWhatsApp();
+  });
