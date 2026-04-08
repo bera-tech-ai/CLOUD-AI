@@ -145,7 +145,13 @@ async function connectToWhatsApp() {
     const sid = config.SESSION_ID;
     if (sid && sid !== 'Your_Session_Id') {
       const ok = await loadSession();
-      if (!ok) _origLog(chalk.yellow('⚠️  Falling back to pairing code...'));
+      if (!ok) {
+        _origLog(chalk.red('❌ Failed to load session. Check your SESSION_ID and restart.'));
+        process.exit(1);
+      }
+    } else {
+      _origLog(chalk.red('❌ No SESSION_ID configured. Set SESSION_ID and restart.'));
+      process.exit(1);
     }
   }
 
@@ -164,30 +170,6 @@ async function connectToWhatsApp() {
     downloadMediaMessage,
   });
 
-  // Pairing code fallback
-  if (!state.creds?.registered) {
-    await new Promise(r => setTimeout(r, 3000));
-    try {
-      const phone = config.OWNER_NUMBER.replace(/\D/g, '');
-      const code = await conn.requestPairingCode(phone);
-      const pretty = code?.match(/.{1,4}/g)?.join('-') || code;
-      _origLog('\n' + '═'.repeat(44));
-      _origLog('       📱  PAIRING CODE');
-      _origLog('═'.repeat(44));
-      _origLog(`  ➤  CODE : ${pretty}`);
-      _origLog(`  ➤  Phone: ${phone}`);
-      _origLog('═'.repeat(44));
-      _origLog('  1. Open WhatsApp → Settings → Linked Devices');
-      _origLog('  2. Link a Device → Link with Phone Number');
-      _origLog('  3. Enter the code above');
-      _origLog('═'.repeat(44) + '\n');
-    } catch (err) {
-      _origLog(chalk.red('❌ Pairing error:'), err.message);
-      setTimeout(() => connectToWhatsApp(), 5000);
-      return;
-    }
-  }
-
   // ─── Bind store to connection (handles LID→JID auto-mapping) ───
   store.bind(conn.ev);
 
@@ -201,9 +183,12 @@ async function connectToWhatsApp() {
       const reason = lastDisconnect?.error?.output?.payload?.error || '';
 
       if (code === DisconnectReason.loggedOut || code === 401) {
-        _origLog(chalk.red('🚪 Logged out. Clearing session...'));
-        fs.rmSync(sessionDir, { recursive: true, force: true });
-        process.exit(1);
+        _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and re-linking via pairing code...'));
+        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
+        try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+        initialConnection = true;
+        setTimeout(() => connectToWhatsApp(), 3000);
+        return;
       } else if (code === 440 || code === 408 || code === 503) {
         // 440 = stream error / conflict — exponential backoff
         reconnectAttempts++;
