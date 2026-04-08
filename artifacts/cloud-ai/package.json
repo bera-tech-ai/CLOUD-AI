@@ -1,0 +1,30 @@
+{
+  "name": "@workspace/cloud-ai",
+  "version": "3.1.0",
+  "description": "CLOUD AI - Advanced WhatsApp Multi-Device Bot by Bruce Bera",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
+    "@whiskeysockets/baileys": "npm:baileys@6.7.21",
+    "@ybd-project/ytdl-core": "^6.0.8",
+    "axios": "^1.7.9",
+    "chalk": "^5.3.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "file-type": "^19.0.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "fs-extra": "^11.2.0",
+    "gifted-btns": "^1.0.2",
+    "moment-timezone": "^0.5.45",
+    "node-cache": "^5.1.2",
+    "pino": "^9.0.0",
+    "play-dl": "^1.9.7",
+    "qrcode-terminal": "^0.12.0",
+    "yt-search": "^2.11.0"
+  }
+}
