@@ -60,28 +60,33 @@ const SUBMENUS = {
       `║  📥  *DOWNLOADERS*         ║`,
       `╚═══════════════════════════╝`,
       '',
-      `${p}ytmp3 — YouTube Audio`,
-      `${p}ytmp4 — YouTube Video`,
-      `${p}tiktok — TikTok Video/Audio`,
-      `${p}instagram — Instagram Post`,
-      `${p}facebook — Facebook Video`,
-      `${p}twitter — Twitter/X Media`,
-      `${p}pinterest — Pinterest Image`,
-      `${p}spotify — Spotify Track`,
-      `${p}capcut — CapCut Video`,
-      `${p}mediafire — MediaFire File`,
-      `${p}terabox — TeraBox File`,
-      `${p}gdrive — Google Drive File`,
-      `${p}aio — Auto Detect Downloader`,
-      `${p}play — Search & choose Audio/Video`,
-      `${p}playaudio — Download as MP3 directly`,
-      `${p}playvideo — Download as MP4 directly`,
-      `${p}gitclone — Clone GitHub Repo`,
+      `*🎵 MUSIC*`,
+      `${p}play <song> — Search & download MP3`,
+      `${p}pv <song> — Search & download MP4`,
+      `${p}ytmp3 <url/name> — YouTube Audio`,
+      `${p}ytmp4 <url/name> — YouTube Video`,
+      `${p}spotify <song/url> — Spotify Track`,
+      `${p}soundcloud <url> — SoundCloud Track`,
+      '',
+      `*📹 VIDEO*`,
+      `${p}tiktok <url> — TikTok (no watermark)`,
+      `${p}instagram <url> — Instagram Post`,
+      `${p}facebook <url> — Facebook Video`,
+      `${p}twitter <url> — Twitter/X Media`,
+      `${p}pinterest <url> — Pinterest Media`,
+      `${p}capcut <url> — CapCut Video`,
+      '',
+      `*📦 FILES*`,
+      `${p}mediafire <url> — MediaFire File`,
+      `${p}terabox <url> — TeraBox File`,
+      `${p}gdrive <url> — Google Drive File`,
+      `${p}aio <url> — Auto Detect (any platform)`,
+      `${p}gitclone <repo> — Clone GitHub Repo`,
     ].join('\n'),
     buttons: [
+      { text: `${p}play <song>`, id: `${p}play faded alan walker` },
       { text: `${p}ytmp3 <url/name>`, id: `${p}ytmp3 faded alan walker` },
       { text: `${p}tiktok <url>`, id: `${p}tiktok example` },
-      { text: `${p}play <song>`, id: `${p}play faded alan walker` },
     ],
   },
   convert: {
@@ -282,27 +287,118 @@ const SUBMENUS = {
       `║  👑  *OWNER COMMANDS*      ║`,
       `╚═══════════════════════════╝`,
       '',
+      `*🤖 Bot Management*`,
+      `${p}setname <name> — Change Bot Name`,
+      `${p}setbio <text> — Change Bot Bio`,
+      `${p}setpp — Change Bot Profile Photo`,
+      `${p}restart — Restart Bot`,
+      `${p}shutdown — Shut Down Bot`,
+      `${p}eval <code> — Run JS Code`,
+      '',
+      `*📢 Communication*`,
+      `${p}broadcast <msg> — Broadcast to All Chats`,
       `${p}block @user — Block User`,
       `${p}unblock <num> — Unblock User`,
-      `${p}broadcast <msg> — Broadcast`,
-      `${p}setname <name> — Bot Name`,
-      `${p}setbio <text> — Bot Bio`,
-      `${p}setpp — Set Bot Photo`,
-      `${p}restart — Restart Bot`,
-      `${p}eval <code> — Run JS Code`,
-      `${p}report <msg> — Dev Report`,
+      `${p}report <msg> — Send Report to Dev`,
       '',
-      `*⚙️ BOT SETTINGS*`,
-      `${p}setmode public/private`,
-      `${p}setautotyping on/off`,
-      `${p}setantidelete on/off`,
-      `${p}setrejectcall on/off`,
-      `${p}settings — View All Settings`,
+      `*🚀 BeraHost Deploy*`,
+      `${p}setapi <key> — Set BeraHost API Key`,
+      `${p}setapiurl <url> — Set BeraHost API URL`,
+      `${p}berahost — List Available Bots`,
+      `${p}deploy <botId> <SESSION> — Deploy a Bot`,
+      `${p}deploystatus <id> — Check Deployment Status`,
+      `${p}mydeployments — List Your Deployments`,
+    ].join('\n'),
+    buttons: [
+      { text: `${p}setapi`, id: `${p}setapi` },
+      { text: `${p}deploy`, id: `${p}berahost` },
+      { text: `${p}restart`, id: `${p}restart` },
+    ],
+  },
+  photo: {
+    emoji: '🖼️',
+    title: 'PHOTO EFFECTS',
+    text: [
+      `╔═══════════════════════════╗`,
+      `║  🖼️  *PHOTO EFFECTS*       ║`,
+      `╚═══════════════════════════╝`,
+      ``,
+      `*How to use:*`,
+      `• Reply to a photo with the command`,
+      `• Or mention someone: ${p}blur @user`,
+      `• Or send alone to apply to your own profile pic`,
+      ``,
+      `*🌫️ FILTERS*`,
+      `${p}blur — Blur effect`,
+      `${p}greyscale — Black & white`,
+      `${p}invert — Invert colors`,
+      `${p}sepia — Vintage/warm tone`,
+      `${p}pixelate — Pixelate effect`,
+      `${p}mirror — Mirror horizontally`,
+      `${p}flip — Flip upside down`,
+      `${p}brighten — Brighten image`,
+      `${p}darken — Darken image`,
+      ``,
+      `*🎭 OVERLAYS*`,
+      `${p}jail — Prison bars`,
+      `${p}wasted — GTA Wasted screen`,
+      `${p}triggered — Triggered meme`,
+      `${p}glass — Broken glass`,
+      `${p}comrade — Soviet flag filter`,
+      `${p}gay — Pride flag filter`,
+      ``,
+      `*🃏 CARDS*`,
+      `${p}simpcard — Simp card`,
+      `${p}horny — Horny card`,
+      `${p}lolice — Lolice card`,
+      ``,
+      `*✂️ SHAPE*`,
+      `${p}circle — Crop image to circle`,
+      ``,
+      `*🌌 AI COSMIC ART*`,
+      `${p}galaxy <theme> — Galaxy/nebula art`,
+      `${p}cosmic <theme> — Cosmic space art`,
+      `${p}nebula <theme> — Nebula art`,
+    ].join('\n'),
+    buttons: [
+      { text: `${p}blur`, id: `${p}blur` },
+      { text: `${p}jail`, id: `${p}jail` },
+      { text: `${p}galaxy galaxy city`, id: `${p}galaxy galaxy city` },
+    ],
+  },
+  settings: {
+    emoji: '⚙️',
+    title: 'BOT SETTINGS',
+    text: [
+      `╔═══════════════════════════╗`,
+      `║  ⚙️  *BOT SETTINGS*        ║`,
+      `╚═══════════════════════════╝`,
+      '',
+      `*📋 VIEW*`,
+      `${p}settings — Show all current settings`,
+      '',
+      `*🔧 GENERAL*`,
+      `${p}setmode public — Allow all users`,
+      `${p}setmode private — Owner only`,
+      `${p}setprefix <char> — Change prefix`,
+      '',
+      `*🔔 FEATURES (on/off)*`,
+      `${p}anticall on/off — Reject incoming calls`,
+      `${p}autotyping on/off — Show typing indicator`,
+      `${p}antidelete on/off — Log deleted messages`,
+      `${p}autoreact on/off — Auto-react to messages`,
+      `${p}autoread on/off — Auto-read messages`,
+      `${p}setonline on/off — Always show online`,
+      `${p}statusseen on/off — Auto-view statuses`,
+      '',
+      `*👥 GROUP FEATURES*`,
+      `${p}antilink on/off — Block links in groups`,
+      `${p}welcome on/off — Welcome new members`,
     ].join('\n'),
     buttons: [
       { text: `${p}settings`, id: `${p}settings` },
-      { text: `${p}broadcast <msg>`, id: `${p}broadcast example` },
-      { text: `${p}restart`, id: `${p}restart` },
+      { text: `${p}anticall on`, id: `${p}anticall on` },
+      { text: `${p}setmode public`, id: `${p}setmode public` },
     ],
   },
 };
@@ -375,7 +471,6 @@ const general = async (m, conn) => {
     const uptime = formatUptime(Date.now() - BOT_START);
     const timeNow = t.format('hh:mm:ss a');
     const dateToday = t.format('DD/MM/YYYY');
-    const PLUGINS = 160;
 
     // invisible separator (WhatsApp "read more" collapse effect)
     const INV = '‎'.repeat(200);
@@ -389,57 +484,64 @@ const general = async (m, conn) => {
 ║      C O M M A N D   H U B     ║
 ╚═══════════════════════════════╝
 
-  ▸ *Mode*      :  ${config.MODE}
-  ▸ *Prefix*    :  [ ${p} ]
-  ▸ *User*      :  ${m.pushName || config.OWNER_NAME}
-  ▸ *Plugins*   :  ${PLUGINS}
-  ▸ *Version*   :  ${config.VERSION}
-  ▸ *Uptime*    :  ${uptime}
-  ▸ *Time*      :  ${timeNow}
-  ▸ *Date*      :  ${dateToday}
-  ▸ *Zone*      :  ${config.TIMEZONE}
-  ▸ *RAM*       :  ${getRam()}
+  ▸ *Mode*    :  ${config.MODE}
+  ▸ *Prefix*  :  [ ${p} ]
+  ▸ *User*    :  ${m.pushName || config.OWNER_NAME}
+  ▸ *Uptime*  :  ${uptime}
+  ▸ *Time*    :  ${timeNow}
+  ▸ *Date*    :  ${dateToday}
+  ▸ *RAM*     :  ${getRam()}
 ${INV}
-${cat('🤖 𝘼𝙄 𝘾𝙃𝘼𝙏', ['ai','chatai','gpt','gpt4','gpt4o','gemini','claude','llama','deepseek','mistral','qwen','grok','venice','openai','letmegpt','translate','lang'])}
+${cat('🤖 𝘼𝙄 𝘾𝙃𝘼𝙏', ['ai','gpt','gpt4o','gemini','claude','llama','deepseek','mistral','qwen','grok','venice','openai','translate','lang'])}
 
 
-${cat('🎨 𝙸𝙼𝘼𝙂𝙀 𝙶𝙀𝙉', ['imagine','flux','dalle','sdxl','pixart'])}
+${cat('🎨 𝙸𝙼𝘼𝙂𝙀 𝙶𝙀𝙉', ['imagine','flux','dalle','sdxl','pixart','galaxy','cosmic','nebula'])}
+
+
+${cat('🖼️ 𝙋𝙃𝙊𝙏𝙊 𝙀𝙁𝙁𝙀𝘾𝙏𝙎', ['blur','greyscale','invert','sepia','pixelate','mirror','flip','brighten','darken','jail','wasted','triggered','glass','comrade','gay','circle','simpcard','horny','lolice'])}
 
 
 ${cat('🔄 𝘾𝙊𝙉𝙑𝙀𝙍𝙏𝙀𝙍', ['sticker','toimg','toaudio','toptt','vv','base64','binary','hex','morse','reverse'])}
 
 
-${cat('📥 𝘿𝙊𝙒𝙉𝙇𝙊𝘼𝘿𝙀𝙍', ['ytmp3','ytmp4','play','tiktok','ig','fb','twitter','spotify','pinterest','capcut','mediafire','terabox','gdrive','gitclone','aio'])}
+${cat('📥 𝘿𝙊𝙒𝙉𝙇𝙊𝘼𝘿𝙀𝙍', ['play','pv','ytmp3','ytmp4','tiktok','ig','fb','twitter','spotify','soundcloud','pinterest','capcut','mediafire','terabox','gdrive','aio'])}
 
 
-${cat('🛠️ 𝙏𝙊𝙊𝙇𝙎', ['weather','lyrics','qr','screenshot','removebg','tts','stalk','pp','carbon','password','shortlink','tourl','encrypt','decrypt','time'])}
+${cat('🛠️ 𝙏𝙊𝙊𝙇𝙎', ['weather','lyrics','qr','screenshot','removebg','tts','stalk','pp','getbio','carbon','password','shortlink','tourl','encrypt','decrypt','time','fetch','domain'])}
 
 
-${cat('💻 𝙏𝙀𝘾𝙃', ['iplookup','dns','hash','uuid','timestamp','httpcode','jsonfmt','urlencode','urldecode','subnet','calc'])}
+${cat('💻 𝙏𝙀𝘾𝙃', ['iplookup','dns','hash','uuid','timestamp','httpcode','jsonfmt','urlencode','urldecode','subnet','calc','berahost','deploy','deploystatus'])}
 
 
 ${cat('🌍 𝙄𝙉𝙁𝙊', ['currency','country','pokedex','horoscope','news','movie','bible','npm','github'])}
 
 
-${cat('🚀 𝘽𝙀𝙍𝘼𝙃𝙊𝙎𝙏', ['berahost','deploy','deploystatus','mydeployments'])}
+${cat('🔍 𝙎𝙀𝘼𝙍𝘾𝙃', ['google','youtube','wikipedia','define','yts','anime','manga','ringtone'])}
 
 
-${cat('🔍 𝙎𝙀𝘼𝙍𝘾𝙃', ['google','wikipedia','define','yts','anime','manga','ringtone'])}
+${cat('🎮 𝙁𝙐𝙉 & 𝙂𝘼𝙈𝙀𝙎', ['rps','trivia','riddle','8ball','dice','coinflip','truth','dare','joke','fact','meme','flirt','pickup','compliment','roast','rizz','advice','lovemeter','bible'])}
 
 
-${cat('🎮 𝙁𝙐𝙉 & 𝙂𝘼𝙈𝙀𝙎', ['rps','trivia','riddle','8ball','dice','coinflip','truth','dare','joke','fact','meme','flirt','pickup','compliment','roast','rizz','advice','lovemeter'])}
+${cat('🎌 𝘼𝙉𝙄𝙈𝙀', ['animelist','ship','waifuim','waifu','neko','hug','slap','kiss','punch','pat'])}
 
 
-${cat('👥 𝙂𝙍𝙊𝙐𝙋', ['add','kick','promote','demote','mute','unmute','tagall','everyone','hidetag','gclink','gcinfo','gcmembers','gcpp','gcname','gcdesc'])}
+${cat('👥 𝙂𝙍𝙊𝙐𝙋', ['add','kick','promote','demote','mute','unmute','tagall','hidetag','gclink','gcinfo','gcmembers','gcpp','setgcname','setgcdesc','antilink','gcleave'])}
 
 
-${cat('👑 𝙊𝙒𝙉𝙀𝙍', ['broadcast','block','unblock','setname','setbio','setpp','restart','eval','setmode','setprefix','settings','setautoread','setonline','setstatusseen','vv','whois'])}
+${cat('⚙️ 𝙎𝙀𝙏𝙏𝙄𝙉𝙂𝙎', ['settings','setmode','setprefix','anticall','autotyping','antidelete','autoreact','autoread','setonline','statusseen','antilink'])}
 
 
-${cat('🎌 𝘼𝙉𝙄𝙈𝙀', ['animelist','ship','lovemeter','waifuim','waifu','neko','hug','slap','kiss','punch','pat'])}
+${cat('👑 𝙊𝙒𝙉𝙀𝙍', ['broadcast','block','unblock','setname','setbio','setpp','restart','eval','report','setapi','setapiurl','deploy','deploystatus','mydeployments','berahost'])}
 
 
-${cat('🎌 𝘼𝙉𝙄𝙈𝙀', ['animelist','ship','lovemeter','waifuim','waifu','neko','hug','slap','kiss','punch','pat'])}
+◈━━━━━[ 🤖 𝘽𝙀𝙍𝘼 𝘼𝙄 𝘼𝙎𝙎𝙄𝙎𝙏𝘼𝙉𝙏 ]━━━━━◈
+  ⟡ Just type *bera* followed by anything
+  ⟡ _bera play faded alan walker_
+  ⟡ _bera weather in Nairobi_
+  ⟡ _bera piga muziki juice wrld_
+  ⟡ _bera open view once_ ← reply to msg
+  ⟡ Understands English, Sheng & Swahili
+◈━━━━━━━━━━━━━━━━━━━━━━━◈
 
 > *ᴘᴏᴡᴇʀᴇᴅ ʙʏ* *${config.BOT_NAME}* | *${config.OWNER_NAME}*`;
 
