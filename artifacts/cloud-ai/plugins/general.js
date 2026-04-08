@@ -320,7 +320,12 @@ const SUBMENUS = {
       `${p}blur — Blur effect`,
       `${p}greyscale — Black & white`,
       `${p}invert — Invert colors`,
-      `${p}sepia — Vintage tone`,
+      `${p}sepia — Vintage/warm tone`,
+      `${p}pixelate — Pixelate effect`,
+      `${p}mirror — Mirror horizontally`,
+      `${p}flip — Flip upside down`,
+      `${p}brighten — Brighten image`,
+      `${p}darken — Darken image`,
       ``,
       `*🎭 OVERLAYS*`,
       `${p}jail — Prison bars`,
@@ -328,6 +333,12 @@ const SUBMENUS = {
       `${p}triggered — Triggered meme`,
       `${p}glass — Broken glass`,
       `${p}comrade — Soviet flag filter`,
+      `${p}gay — Pride flag filter`,
+      ``,
+      `*🃏 CARDS*`,
+      `${p}simpcard — Simp card`,
+      `${p}horny — Horny card`,
+      `${p}lolice — Lolice card`,
       ``,
       `*✂️ SHAPE*`,
       `${p}circle — Crop image to circle`,
@@ -475,7 +486,7 @@ ${cat('🤖 𝘼𝙄 𝘾𝙃𝘼𝙏', ['ai','gpt','gpt4o','gemini','claude','l
 ${cat('🎨 𝙸𝙼𝘼𝙂𝙀 𝙶𝙀𝙉', ['imagine','flux','dalle','sdxl','pixart','galaxy','cosmic','nebula'])}
 
 
-${cat('🖼️ 𝙋𝙃𝙊𝙏𝙊 𝙀𝙁𝙁𝙀𝘾𝙏𝙎', ['blur','greyscale','invert','sepia','jail','wasted','triggered','glass','comrade','circle'])}
+${cat('🖼️ 𝙋𝙃𝙊𝙏𝙊 𝙀𝙁𝙁𝙀𝘾𝙏𝙎', ['blur','greyscale','invert','sepia','pixelate','mirror','flip','brighten','darken','jail','wasted','triggered','glass','comrade','gay','circle','simpcard','horny','lolice'])}
 
 
 ${cat('🔄 𝘾𝙊𝙉𝙑𝙀𝙍𝙏𝙀𝙍', ['sticker','toimg','toaudio','toptt','vv','base64','binary','hex','morse','reverse'])}
