@@ -23,7 +23,9 @@ const BUTTON_CMDS = [
   { label: '📋 Menu',        cmd: 'menu',    desc: 'Full command list' },
   { label: 'ℹ️ Info',        cmd: 'info',    desc: 'Bot info & credits' },
   { label: '🔍 JID',         cmd: 'jid',     desc: 'Your WhatsApp JID' },
-  { label: '⚙️ Settings',    cmd: 'settings', desc: 'Current bot settings' },
+  { label: '⚙️ Settings',    cmd: 'settings', desc: 'View current settings' },
+  { label: '⚙️ Settings Menu', cmd: 'settings menu', desc: 'All settings commands' },
+  { label: '🖼️ Photo FX',    cmd: 'photo menu', desc: 'Photo effects commands' },
   { label: '🤖 AI Menu',     cmd: 'ai menu', desc: 'AI & image commands' },
   { label: '📥 DL Menu',     cmd: 'dl menu', desc: 'Downloader commands' },
   { label: '🔄 Convert',     cmd: 'convert menu', desc: 'Converter commands' },
@@ -31,6 +33,7 @@ const BUTTON_CMDS = [
   { label: '🎮 Games',       cmd: 'games menu', desc: 'Fun & games' },
   { label: '🌍 Info',        cmd: 'info menu', desc: 'Info & lookup commands' },
   { label: '👥 Group',       cmd: 'group menu', desc: 'Group management' },
+  { label: '👑 Owner',       cmd: 'owner menu', desc: 'Owner commands' },
 ];
 
 // Commands that accept a query argument (shown with placeholder)
