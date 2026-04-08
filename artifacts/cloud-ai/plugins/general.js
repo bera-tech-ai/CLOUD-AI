@@ -303,6 +303,46 @@ const SUBMENUS = {
       { text: `${p}restart`, id: `${p}restart` },
     ],
   },
+  photo: {
+    emoji: '🖼️',
+    title: 'PHOTO EFFECTS',
+    text: [
+      `╔═══════════════════════════╗`,
+      `║  🖼️  *PHOTO EFFECTS*       ║`,
+      `╚═══════════════════════════╝`,
+      ``,
+      `*How to use:*`,
+      `• Reply to a photo with the command`,
+      `• Or mention someone: ${p}blur @user`,
+      `• Or send alone to apply to your own profile pic`,
+      ``,
+      `*🌫️ FILTERS*`,
+      `${p}blur — Blur effect`,
+      `${p}greyscale — Black & white`,
+      `${p}invert — Invert colors`,
+      `${p}sepia — Vintage tone`,
+      ``,
+      `*🎭 OVERLAYS*`,
+      `${p}jail — Prison bars`,
+      `${p}wasted — GTA Wasted screen`,
+      `${p}triggered — Triggered meme`,
+      `${p}glass — Broken glass`,
+      `${p}comrade — Soviet flag filter`,
+      ``,
+      `*✂️ SHAPE*`,
+      `${p}circle — Crop image to circle`,
+      ``,
+      `*🌌 AI COSMIC ART*`,
+      `${p}galaxy <theme> — Galaxy/nebula art`,
+      `${p}cosmic <theme> — Cosmic space art`,
+      `${p}nebula <theme> — Nebula art`,
+    ].join('\n'),
+    buttons: [
+      { text: `${p}blur`, id: `${p}blur` },
+      { text: `${p}jail`, id: `${p}jail` },
+      { text: `${p}galaxy galaxy city`, id: `${p}galaxy galaxy city` },
+    ],
+  },
   settings: {
     emoji: '⚙️',
     title: 'BOT SETTINGS',
@@ -432,7 +472,10 @@ ${INV}
 ${cat('🤖 𝘼𝙄 𝘾𝙃𝘼𝙏', ['ai','gpt','gpt4o','gemini','claude','llama','deepseek','mistral','qwen','grok','venice','openai','translate','lang'])}
 
 
-${cat('🎨 𝙸𝙼𝘼𝙂𝙀 𝙶𝙀𝙉', ['imagine','flux','dalle','sdxl','pixart'])}
+${cat('🎨 𝙸𝙼𝘼𝙂𝙀 𝙶𝙀𝙉', ['imagine','flux','dalle','sdxl','pixart','galaxy','cosmic','nebula'])}
+
+
+${cat('🖼️ 𝙋𝙃𝙊𝙏𝙊 𝙀𝙁𝙁𝙀𝘾𝙏𝙎', ['blur','greyscale','invert','sepia','jail','wasted','triggered','glass','comrade','circle'])}
 
 
 ${cat('🔄 𝘾𝙊𝙉𝙑𝙀𝙍𝙏𝙀𝙍', ['sticker','toimg','toaudio','toptt','vv','base64','binary','hex','morse','reverse'])}
