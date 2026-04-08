@@ -73,20 +73,35 @@ const credsPath = path.join(sessionDir, 'creds.json');
 if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
 // ─── Suppress Baileys crypto noise ───
-const _origLog = console.log, _origErr = console.error, _origWarn = console.warn;
-const SUPPRESS = [/Closing session/i, /Closing open session/i, /SessionEntry/i, /indexInfo/i,
+const _origLog = console.log, _origErr = console.error, _origWarn = console.warn, _origInfo = console.info;
+const SUPPRESS = [
+  /Closing session/i, /Closing open session/i, /SessionEntry/i, /indexInfo/i,
   /_chains/i, /ephemeralKeyPair/i, /rootKey/i, /baseKey/i, /pendingPreKey/i,
-  /currentRatchet/i, /registrationId/i, /Bad MAC/i, /decryptWithSessions/i, /verifyMAC/i];
+  /currentRatchet/i, /registrationId/i, /Bad MAC/i, /decryptWithSessions/i,
+  /verifyMAC/i, /chainKey/i, /chainType/i, /messageKeys/i, /baseKeyType/i,
+  /remoteIdentityKey/i, /signedKeyId/i, /preKeyId/i, /privKey/i, /pubKey/i,
+  /<Buffer /i, /previousCounter/i,
+];
 function suppress(fn) {
   return (...args) => {
-    const str = args.map(a => typeof a === 'string' ? a : (a && typeof a === 'object' && a._chains ? '[SessionEntry]' : JSON.stringify(a))).join(' ');
-    if (SUPPRESS.some(p => p.test(str)) || (args[0] && args[0]._chains)) return;
+    try {
+      const str = args.map(a => {
+        if (typeof a === 'string') return a;
+        if (a && typeof a === 'object') {
+          if (a._chains || a.currentRatchet || a.indexInfo) return '[SessionEntry]';
+          try { return JSON.stringify(a); } catch { return String(a); }
+        }
+        return String(a ?? '');
+      }).join(' ');
+      if (SUPPRESS.some(p => p.test(str))) return;
+    } catch { /* pass through if check fails */ }
     fn(...args);
   };
 }
-console.log = suppress(_origLog);
+console.log   = suppress(_origLog);
 console.error = suppress(_origErr);
-console.warn = suppress(_origWarn);
+console.warn  = suppress(_origWarn);
+console.info  = suppress(_origInfo);   // libsignal uses console.info for "Closing session"
 
 // ─── Simple contacts store (makeInMemoryStore removed in baileys@6.7.21) ───
 const store = { contacts: {} };
