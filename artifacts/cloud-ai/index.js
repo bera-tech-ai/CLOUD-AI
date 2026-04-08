@@ -231,6 +231,18 @@ async function connectToWhatsApp() {
             text: `╔══════════════════════╗\n║  *${config.BOT_NAME}* Online ✅  ║\n╚══════════════════════╝\n\n🤖 *Bot:* ${config.BOT_NAME}\n📱 *Number:* ${botNum}\n📶 *Mode:* ${config.MODE}\n👑 *Owner:* ${config.OWNER_NAME}\n🕒 *Time:* ${moment().tz('Africa/Nairobi').format('HH:mm:ss DD/MM/YYYY')}\n\n_Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           });
         } catch (_) {}
+
+        // Resolve owner's phone → @lid JID for group isOwner detection
+        try {
+          const ownerPhone = config.OWNER_NUMBER + '@s.whatsapp.net';
+          const results = await conn.onWhatsApp(config.OWNER_NUMBER);
+          const ownerInfo = Array.isArray(results) ? results[0] : results;
+          if (ownerInfo?.jid && ownerInfo.jid !== ownerPhone) {
+            lidMap.set(ownerInfo.jid, ownerPhone);   // @lid → phone JID
+            lidMap.set(ownerPhone, ownerInfo.jid);   // phone JID → @lid (reverse)
+            _origLog(lime(`🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`));
+          }
+        } catch (_) {}
       }
     }
   });
