@@ -63,6 +63,7 @@ const PORT = parseInt(process.env.PORT) || 3000;
 const lime = chalk.bold.hex('#32CD32');
 const orange = chalk.bold.hex('#FFA500');
 let initialConnection = true;
+let reconnectAttempts = 0;
 const msgRetryCounterCache = new NodeCache();
 const messageStore = new Map();
 
@@ -185,23 +186,27 @@ async function connectToWhatsApp() {
   });
 
   // ─── Connection Updates ───
-  let reconnectAttempts = 0;
   conn.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
-      const reason = lastDisconnect?.error?.output?.payload?.error || '';
 
       if (code === DisconnectReason.loggedOut || code === 401) {
         _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and re-linking via pairing code...'));
         try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
         try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+        reconnectAttempts = 0;
         initialConnection = true;
         setTimeout(() => connectToWhatsApp(), 3000);
         return;
-      } else if (code === 440 || code === 408 || code === 503) {
-        // 440 = stream error / conflict — exponential backoff
+      } else if (code === 440) {
+        // 440 = stream conflict — wait 60s to let WhatsApp fully clear the old session
+        reconnectAttempts++;
+        const wait440 = reconnectAttempts <= 3 ? 60000 : Math.min(60000 * reconnectAttempts, 300000);
+        _origLog(chalk.yellow(`⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440/1000)}s for WA to settle...`));
+        setTimeout(() => connectToWhatsApp(), wait440);
+      } else if (code === 408 || code === 503) {
         reconnectAttempts++;
         const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 60000);
         _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
@@ -215,6 +220,7 @@ async function connectToWhatsApp() {
     }
 
     if (connection === 'open') {
+      reconnectAttempts = 0;
       if (initialConnection) {
         initialConnection = false;
         const botNum = conn.user?.id?.split(':')[0];
