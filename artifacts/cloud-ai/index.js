@@ -9,7 +9,6 @@ import {
   useMultiFileAuthState,
   getContentType,
   downloadMediaMessage,
-  makeInMemoryStore,
 } from '@whiskeysockets/baileys';
 import { Handler, Callupdate } from './data/handler.js';
 import { lidMap } from './lib/Serializer.js';
@@ -88,8 +87,8 @@ console.log = suppress(_origLog);
 console.error = suppress(_origErr);
 console.warn = suppress(_origWarn);
 
-// ─── In-memory store (auto-handles LID → JID resolution) ───
-const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+// ─── Simple contacts store (makeInMemoryStore removed in baileys@6.7.21) ───
+const store = { contacts: {} };
 
 // ─── Global crash guard — prevents any internal Baileys error from killing the process ───
 process.on('uncaughtException', (err) => {
@@ -173,8 +172,17 @@ async function connectToWhatsApp() {
     downloadMediaMessage,
   });
 
-  // ─── Bind store to connection (handles LID→JID auto-mapping) ───
-  store.bind(conn.ev);
+  // ─── Populate simple store contacts from events ───
+  conn.ev.on('contacts.upsert', (contacts) => {
+    for (const c of contacts) {
+      if (c.id) store.contacts[c.id] = c;
+    }
+  });
+  conn.ev.on('contacts.update', (updates) => {
+    for (const u of updates) {
+      if (u.id) store.contacts[u.id] = { ...(store.contacts[u.id] || {}), ...u };
+    }
+  });
 
   // ─── Connection Updates ───
   let reconnectAttempts = 0;
