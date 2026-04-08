@@ -45,8 +45,10 @@ import funPlugin from './plugins/fun.js';
 import infoPlugin from './plugins/info.js';
 import { onGroupUpdate } from './plugins/welcome.js';
 import { handleCall } from './plugins/anticall.js';
+import btnmenuPlugin from './plugins/btnmenu.js';
 
 const ALL_PLUGINS = [
+  btnmenuPlugin,
   generalPlugin, aiPlugin, imaginePlugin, animePlugin,
   downloaderPlugin, converterPlugin, toolsPlugin, extraPlugin,
   groupPlugin, ownerPlugin, searchPlugin, gamesPlugin, settingsPlugin,
