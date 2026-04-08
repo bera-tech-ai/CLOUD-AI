@@ -152,13 +152,21 @@ Examples:
       const imgUrl = top.thumbnail ||
         `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
 
-      // Use m.realJid (real phone JID, not @lid) so interactive buttons route correctly
       const targetJid = m.realJid || m.from;
+
+      // Send the song card as a regular image message first (always visible)
+      await conn.sendMessage(targetJid, {
+        image: { url: imgUrl },
+        caption: card,
+      }, { quoted: { key: m.key, message: m.message } }).catch(() =>
+        conn.sendMessage(targetJid, { text: card }, { quoted: { key: m.key, message: m.message } })
+      );
+
+      // Send interactive buttons separately (no image — avoids upload issues)
       await sendBtn(conn, targetJid, {
         title: `🎵 ${config.BOT_NAME}`,
-        body: card,
+        body: `👇 *Choose your format:*`,
         footer: config.BOT_NAME,
-        image: imgUrl,
         buttons: [
           { id: 'play_audio', text: '🎵 Audio MP3' },
           { id: 'play_video', text: '🎬 Video MP4' },
