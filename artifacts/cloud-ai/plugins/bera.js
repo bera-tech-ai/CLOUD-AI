@@ -274,8 +274,97 @@ You understand:
 Your ONLY job is to map the user's request to ONE bot command from the catalogue.
 `;
 
+// ─── LOCAL REGEX QUICK-MATCH (runs BEFORE AI — deterministic and instant) ────
+function quickMatch(req) {
+  const r = req.trim();
+  const rl = r.toLowerCase();
+
+  // ── Music / Play ──────────────────────────────────────────────────────────
+  // "play X", "piga muziki X", "cheza X", "nipigie X", "play me X"
+  let m = rl.match(/^(?:play(?:\s+me)?|piga\s+muziki|cheza|nipigie(?:\s+muziki)?)\s+(.+)/i);
+  if (m) return `${p}play ${r.slice(rl.indexOf(m[1]))}`;
+
+  // "find and play X", "search and play X", "play the song X", "play music called X"
+  m = r.match(/^(?:find\s+and\s+play|search\s+and\s+play|play\s+(?:the\s+)?(?:song|music|track)(?:\s+(?:by\s+the\s+name\s+(?:of\s+)?|called\s+|named\s+))?)\s*(.+)/i);
+  if (m) return `${p}play ${m[1]}`;
+
+  // "play music by the name X" or "a song called X"
+  m = r.match(/(?:by\s+the\s+name\s+(?:of\s+)?|song\s+called\s+|track\s+called\s+|music\s+called\s+|song\s+named\s+)(.+)/i);
+  if (m) return `${p}play ${m[1]}`;
+
+  // ── Video Download ────────────────────────────────────────────────────────
+  m = rl.match(/^(?:download(?:\s+video)?|play\s+video|pv|video)\s+(.+)/i);
+  if (m) return `${p}pv ${r.slice(rl.indexOf(m[1]))}`;
+
+  // ── Weather ───────────────────────────────────────────────────────────────
+  m = r.match(/^(?:weather(?:\s+in)?|hali\s+ya\s+hewa(?:\s+ya)?|weather\s+forecast\s+(?:for\s+)?)\s*(.+)/i);
+  if (m) return `${p}weather ${m[1]}`;
+
+  // ── Translate ─────────────────────────────────────────────────────────────
+  m = r.match(/^(?:translate|tafsiri)\s+(.+?)\s+(?:to|kwa|into)\s+(.+)/i);
+  if (m) return `${p}translate ${m[1]} to ${m[2]}`;
+
+  // ── Sticker ───────────────────────────────────────────────────────────────
+  if (/^(?:make|create|generate|convert(?:\s+to)?|fanya)\s+(?:a\s+)?sticker/i.test(rl)) return `${p}sticker`;
+  if (/^sticker$/i.test(rl)) return `${p}sticker`;
+
+  // ── View Once ────────────────────────────────────────────────────────────
+  if (/(?:open|reveal|show|view|see)\s+(?:this\s+)?(?:view\s+once|hidden|vv|viewonce)/i.test(rl)) return `${p}vv`;
+
+  // ── Joke ─────────────────────────────────────────────────────────────────
+  if (/(?:tell|niambie|nipigie|give|send)?\s*(?:me\s+)?(?:a\s+)?joke/i.test(rl)) return `${p}joke`;
+
+  // ── Lyrics ───────────────────────────────────────────────────────────────
+  m = r.match(/^(?:lyrics(?:\s+of|\s+for)?|show\s+lyrics(?:\s+of|\s+for)?|get\s+lyrics(?:\s+of|\s+for)?)\s+(.+)/i);
+  if (m) return `${p}lyrics ${m[1]}`;
+
+  // ── Define / Dictionary ──────────────────────────────────────────────────
+  m = r.match(/^(?:define|meaning\s+of|what\s+(?:does|is)\s+the\s+meaning\s+of|what\s+is)\s+(.+)/i);
+  if (m) return `${p}define ${m[1]}`;
+
+  // ── Wikipedia ────────────────────────────────────────────────────────────
+  m = r.match(/^(?:wikipedia|search\s+wikipedia(?:\s+for)?|wiki)\s+(.+)/i);
+  if (m) return `${p}wikipedia ${m[1]}`;
+
+  // ── Google ───────────────────────────────────────────────────────────────
+  m = r.match(/^(?:google|search(?:\s+google\s+for)?|google\s+search)\s+(.+)/i);
+  if (m) return `${p}google ${m[1]}`;
+
+  // ── QR Code ──────────────────────────────────────────────────────────────
+  m = r.match(/^(?:qr|generate\s+qr(?:\s+code\s+for)?|create\s+qr(?:\s+code\s+for)?)\s+(.+)/i);
+  if (m) return `${p}qr ${m[1]}`;
+
+  // ── Screenshot ───────────────────────────────────────────────────────────
+  m = r.match(/^(?:screenshot|take\s+(?:a\s+)?screenshot\s+of)\s+(https?:\/\/.+)/i);
+  if (m) return `${p}screenshot ${m[1]}`;
+
+  // ── TTS ──────────────────────────────────────────────────────────────────
+  m = r.match(/^(?:tts|text\s+to\s+speech|say|speak)\s+(.+)/i);
+  if (m) return `${p}tts ${m[1]}`;
+
+  // ── Ping / Status ─────────────────────────────────────────────────────────
+  if (/^(?:ping|test\s+bot|is\s+the\s+bot\s+alive|bot\s+alive)$/i.test(rl)) return `${p}ping`;
+  if (/^(?:uptime|how\s+long|runtime)$/i.test(rl)) return `${p}uptime`;
+  if (/^(?:menu|commands|help|what\s+can\s+you\s+do)$/i.test(rl)) return `${p}menu`;
+
+  // ── Galaxy / Cosmic AI art ────────────────────────────────────────────────
+  m = r.match(/^(?:generate|create|make|draw)?\s*(?:a\s+)?(?:galaxy|cosmic|nebula|space\s+art)\s+(?:of\s+|with\s+)?(.+)/i);
+  if (m && /galaxy|cosmic|nebula|space/i.test(rl)) {
+    const keyword = /cosmic/i.test(rl) ? 'cosmic' : /nebula/i.test(rl) ? 'nebula' : 'galaxy';
+    return `${p}${keyword} ${m[1]}`;
+  }
+
+  return null; // let AI handle it
+}
+
 // ─── AI MAPPER ───────────────────────────────────────────────────────────────
 async function mapToCommand(request) {
+  // Try local regex first — instant and reliable
+  const quick = quickMatch(request);
+  if (quick) {
+    console.log(`[BERA] quick-match: "${request}" → "${quick}"`);
+    return quick;
+  }
   const fullPrompt = `${SYSTEM_IDENTITY}
 
 COMMAND CATALOGUE:
@@ -376,12 +465,14 @@ const bera = async (m, conn) => {
   if (!m.body) return;
 
   const body = m.body.trim();
+  // Use m.sender for DMs (resolves @lid via senderPn), m.from for groups
+  const replyTo = m.isGroup ? m.from : m.sender;
 
   // ─── "bera" alone → friendly greeting ────────────────────────────────────
   if (/^bera\.?$/i.test(body)) {
     await m.React('🤖');
     const name = m.pushName ? `, ${m.pushName.split(' ')[0]}` : '';
-    await conn.sendMessage(m.from, {
+    await conn.sendMessage(replyTo, {
       text: [
         `🤖 *Bera AI Assistant*`,
         ``,
@@ -429,7 +520,7 @@ const bera = async (m, conn) => {
   console.log(`[BERA] "${request}" → "${mappedCmd}"`);
 
   // Send discreet execution message (no command reveal)
-  await conn.sendMessage(m.from, {
+  await conn.sendMessage(replyTo, {
     text: randomExec(),
   }).catch(() => {});
 
