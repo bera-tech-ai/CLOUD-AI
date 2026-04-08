@@ -1,5 +1,4 @@
-import pkg from '@whiskeysockets/baileys';
-const { getContentType, jidNormalizedUser, proto } = pkg;
+import { getContentType, jidNormalizedUser, proto } from '@whiskeysockets/baileys';
 
 // Global LID → phone JID map (populated from contacts.upsert events)
 export const lidMap = new Map();
