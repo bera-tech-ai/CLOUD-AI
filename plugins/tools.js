@@ -289,6 +289,212 @@ const tools = async (m, conn) => {
     }
     return;
   }
+
+  // ─── BINARY ENCODE ───
+  if (['ebinary', 'tobinary', 'binenc'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}ebinary <text>\n\n> ${config.BOT_NAME}`);
+    await m.React('🔢');
+    const binary = q.split('').map(c => c.charCodeAt(0).toString(2).padStart(8, '0')).join(' ');
+    await m.reply(`🔢 *Binary Encoded*\n\n\`\`\`${binary}\`\`\`\n\n> Use ${config.PREFIX}debinary to decode\n> ${config.BOT_NAME}`);
+    await m.React('✅');
+    return;
+  }
+
+  // ─── BINARY DECODE ───
+  if (['debinary', 'frombinary', 'bindec'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}debinary <binary>\n\n> ${config.BOT_NAME}`);
+    await m.React('🔡');
+    try {
+      const text = q.trim().split(/\s+/).map(b => String.fromCharCode(parseInt(b, 2))).join('');
+      await m.reply(`🔡 *Binary Decoded*\n\n\`\`\`${text}\`\`\`\n\n> ${config.BOT_NAME}`);
+      await m.React('✅');
+    } catch {
+      await m.React('❌');
+      await m.reply(`❌ Invalid binary input.\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── BASE64 ENCODE ───
+  if (['ebase64', 'tobase64', 'b64enc'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}ebase64 <text>\n\n> ${config.BOT_NAME}`);
+    await m.React('🔐');
+    const encoded = Buffer.from(q).toString('base64');
+    await m.reply(`🔐 *Base64 Encoded*\n\n\`\`\`${encoded}\`\`\`\n\n> Use ${config.PREFIX}dbase64 to decode\n> ${config.BOT_NAME}`);
+    await m.React('✅');
+    return;
+  }
+
+  // ─── BASE64 DECODE ───
+  if (['dbase64', 'frombase64', 'b64dec'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}dbase64 <base64>\n\n> ${config.BOT_NAME}`);
+    await m.React('🔓');
+    try {
+      const decoded = Buffer.from(q, 'base64').toString('utf-8');
+      await m.reply(`🔓 *Base64 Decoded*\n\n\`\`\`${decoded}\`\`\`\n\n> ${config.BOT_NAME}`);
+      await m.React('✅');
+    } catch {
+      await m.React('❌');
+      await m.reply(`❌ Invalid Base64 input.\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── HEX ENCODE ───
+  if (['ehex', 'tohex', 'hexenc'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}ehex <text>\n\n> ${config.BOT_NAME}`);
+    await m.React('🔢');
+    const hex = Buffer.from(q).toString('hex');
+    await m.reply(`🔢 *Hex Encoded*\n\n\`\`\`${hex}\`\`\`\n\n> Use ${config.PREFIX}dhex to decode\n> ${config.BOT_NAME}`);
+    await m.React('✅');
+    return;
+  }
+
+  // ─── HEX DECODE ───
+  if (['dhex', 'fromhex', 'hexdec'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}dhex <hex>\n\n> ${config.BOT_NAME}`);
+    await m.React('🔓');
+    try {
+      const decoded = Buffer.from(q.replace(/\s+/g, ''), 'hex').toString('utf-8');
+      await m.reply(`🔓 *Hex Decoded*\n\n\`\`\`${decoded}\`\`\`\n\n> ${config.BOT_NAME}`);
+      await m.React('✅');
+    } catch {
+      await m.React('❌');
+      await m.reply(`❌ Invalid hex input.\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── MORSE ENCODE ───
+  if (['emorse', 'tomorse', 'morseenc'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}emorse <text>\n\n> ${config.BOT_NAME}`);
+    await m.React('📡');
+    const MORSE = { A:'.-',B:'-...',C:'-.-.',D:'-..',E:'.',F:'..-.',G:'--.',H:'....',I:'..',J:'.---',K:'-.-',L:'.-..',M:'--',N:'-.',O:'---',P:'.--.',Q:'--.-',R:'.-.',S:'...',T:'-',U:'..-',V:'...-',W:'.--',X:'-..-',Y:'-.--',Z:'--..',0:'-----',1:'.----',2:'..---',3:'...--',4:'....-',5:'.....',6:'-....',7:'--...',8:'---..',9:'----.' };
+    const encoded = q.toUpperCase().split('').map(c => c === ' ' ? '/' : (MORSE[c] || '?')).join(' ');
+    await m.reply(`📡 *Morse Code*\n\n\`\`\`${encoded}\`\`\`\n\n> Use ${config.PREFIX}dmorse to decode\n> ${config.BOT_NAME}`);
+    await m.React('✅');
+    return;
+  }
+
+  // ─── MORSE DECODE ───
+  if (['dmorse', 'frommorse', 'morsedec'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}dmorse <morse code>\n\n> ${config.BOT_NAME}`);
+    await m.React('📡');
+    const MORSE_REV = {  '.-':'A','-...':'B','-.-.':'C','-..':'D','.':'E','..-.':'F','--.':'G','....':'H','..':'I','.---':'J','-.-':'K','.-..':'L','--':'M','-.':'N','---':'O','.--.':'P','--.-':'Q','.-.':'R','...':'S','-':'T','..-':'U','...-':'V','.--':'W','-..-':'X','-.--':'Y','--..':'Z','-----':'0','.----':'1','..---':'2','...--':'3','....-':'4','.....':'5','-....':'6','--...':'7','---..':'8','----.':'9' };
+    const decoded = q.split(' / ').map(word => word.split(' ').map(c => MORSE_REV[c] || '?').join('')).join(' ');
+    await m.reply(`📡 *Morse Decoded*\n\n\`\`\`${decoded}\`\`\`\n\n> ${config.BOT_NAME}`);
+    await m.React('✅');
+    return;
+  }
+
+  // ─── FETCH URL ───
+  if (['fetch', 'geturl', 'curl'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}fetch <URL>\n\n> ${config.BOT_NAME}`);
+    await m.React('🌐');
+    try {
+      let url = q.trim();
+      if (!url.startsWith('http')) url = 'https://' + url;
+      const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 30000, validateStatus: () => true });
+      const ct = res.headers['content-type'] || 'text/plain';
+      const buf = Buffer.from(res.data);
+      if (ct.includes('image/')) {
+        return conn.sendMessage(m.from, { image: buf, caption: `🌐 *${url}*\n\n> ${config.BOT_NAME}` }, { quoted: { key: m.key, message: m.message } });
+      }
+      if (ct.includes('video/')) {
+        return conn.sendMessage(m.from, { video: buf, caption: `🌐 *${url}*\n\n> ${config.BOT_NAME}` }, { quoted: { key: m.key, message: m.message } });
+      }
+      if (ct.includes('json')) {
+        try {
+          const json = JSON.parse(buf.toString('utf8'));
+          return m.reply('```json\n' + JSON.stringify(json, null, 2).slice(0, 3500) + '\n```');
+        } catch {}
+      }
+      const text = buf.toString('utf8').slice(0, 3000);
+      await m.reply(`🌐 *Response from:* ${url}\n\n\`\`\`\n${text}\n\`\`\`\n\n> ${config.BOT_NAME}`);
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Fetch failed: ${err.message}\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── SCREENSHOT (mobile view) ───
+  if (['ssphone', 'ssmobile', 'phoness'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}ssphone <URL>\n\n> ${config.BOT_NAME}`);
+    await m.React('📱');
+    try {
+      const ssUrl = `https://s.pagepeeker.com/v2/thumbs.php?size=x&url=${encodeURIComponent(q)}&apikey=free`;
+      const alt = `https://api.apiflash.com/v1/urltoimage?access_key=free&url=${encodeURIComponent(q)}&width=390&height=844`;
+      const imgUrl = `https://screenshot.guru/screenshot/${encodeURIComponent(q)}/390/844`;
+      const data = await gApi('tools/ssphone', { url: q }).catch(() => null);
+      const img = data?.result?.image || data?.image || imgUrl;
+      await conn.sendMessage(m.from, {
+        image: { url: img },
+        caption: `📱 *Mobile Screenshot*\n🌐 ${q}\n\n> ${config.BOT_NAME}`,
+      }, { quoted: { key: m.key, message: m.message } });
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Screenshot failed: ${err.message}\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── SCREENSHOT (tablet view) ───
+  if (['sstab', 'sstablet', 'tabletss'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}sstab <URL>\n\n> ${config.BOT_NAME}`);
+    await m.React('📱');
+    try {
+      const data = await gApi('tools/sstab', { url: q }).catch(() => null);
+      const img = data?.result?.image || data?.image || `https://screenshot.guru/screenshot/${encodeURIComponent(q)}/768/1024`;
+      await conn.sendMessage(m.from, {
+        image: { url: img },
+        caption: `📱 *Tablet Screenshot*\n🌐 ${q}\n\n> ${config.BOT_NAME}`,
+      }, { quoted: { key: m.key, message: m.message } });
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Screenshot failed: ${err.message}\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── SCREENSHOT (desktop view) ───
+  if (['sspc', 'ssweb', 'pcss', 'desktopss'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}sspc <URL>\n\n> ${config.BOT_NAME}`);
+    await m.React('🖥️');
+    try {
+      const data = await gApi('tools/sspc', { url: q }).catch(() => null);
+      const img = data?.result?.image || data?.image || `https://screenshot.guru/screenshot/${encodeURIComponent(q)}/1280/800`;
+      await conn.sendMessage(m.from, {
+        image: { url: img },
+        caption: `🖥️ *Desktop Screenshot*\n🌐 ${q}\n\n> ${config.BOT_NAME}`,
+      }, { quoted: { key: m.key, message: m.message } });
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Screenshot failed: ${err.message}\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── DOMAIN INFO ───
+  if (['domain', 'whois', 'domaincheck'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}domain <domain.com>\n\n> ${config.BOT_NAME}`);
+    await m.React('🌐');
+    try {
+      const res = await axios.get(`https://api.domainsdb.info/v1/domains/search?domain=${q}&limit=1`, { timeout: 10000 });
+      const info = res.data?.domains?.[0];
+      if (!info) throw new Error('Domain not found');
+      await m.reply(`🌐 *Domain Info*\n\n🔖 *Domain:* ${info.domain}\n📅 *Created:* ${info.create_date?.split('T')[0] || 'N/A'}\n📅 *Updated:* ${info.update_date?.split('T')[0] || 'N/A'}\n🟢 *Country:* ${info.country || 'Global'}\n🔒 *HTTPS:* ${info.isDead === 'False' ? '✅ Live' : '❌ Dead'}\n\n> ${config.BOT_NAME}`);
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Domain lookup failed: ${err.message}\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
 };
 
 export default tools;
