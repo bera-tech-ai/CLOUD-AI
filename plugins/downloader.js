@@ -86,6 +86,9 @@ const downloader = async (m, conn) => {
   if (!m.body) return;
 
   // ─── Button tap handler: play_audio / play_video ─────────────────────────
+  if (m.selectedId) {
+    console.log('[BTN TAP]', m.selectedId, '| from:', m.from, '| sender:', m.sender, '| realJid:', m.realJid);
+  }
   if (m.selectedId && ['play_audio', 'play_video'].includes(m.selectedId)) {
     // Try all JID variations since the tap response JID may differ from the send JID
     const cached = global._playCache?.get(m.from + ':' + m.sender)
