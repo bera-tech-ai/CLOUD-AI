@@ -521,6 +521,16 @@ ${cat('⚙️ 𝙎𝙀𝙏𝙏𝙄𝙉𝙂𝙎', ['settings','setmode','setprefi
 
 ${cat('👑 𝙊𝙒𝙉𝙀𝙍', ['broadcast','block','unblock','setname','setbio','setpp','restart','eval','report'])}
 
+
+◈━━━━━[ 🤖 𝘽𝙀𝙍𝘼 𝘼𝙄 𝘼𝙎𝙎𝙄𝙎𝙏𝘼𝙉𝙏 ]━━━━━◈
+  ⟡ Just type *bera* followed by anything
+  ⟡ _bera play faded alan walker_
+  ⟡ _bera weather in Nairobi_
+  ⟡ _bera piga muziki juice wrld_
+  ⟡ _bera open view once_ ← reply to msg
+  ⟡ Understands English, Sheng & Swahili
+◈━━━━━━━━━━━━━━━━━━━━━━━◈
+
 > *ᴘᴏᴡᴇʀᴇᴅ ʙʏ* *${config.BOT_NAME}* | *${config.OWNER_NAME}*`;
 
     await sendBtn(conn, m.from, {
