@@ -1,6 +1,10 @@
 import config from '../config.cjs';
 import fs from 'fs';
-import { downloadAudio, downloadVideo, ytSearch, cleanTmp, getInfo } from '../lib/ytdlp.js';
+import { downloadAudio, downloadVideo, ytSearch, getInfo } from '../lib/ytdlp.js';
+import { createRequire } from 'module';
+
+const _require = createRequire(import.meta.url);
+const { sendButtons } = _require('gifted-btns');
 
 const p = config.PREFIX;
 
@@ -39,8 +43,67 @@ async function sendFile(conn, m, file, type, caption, meta) {
   }
 }
 
+// ─── Download audio and send ─────────────────────────────────────────────────
+async function doAudioDownload(conn, m, top) {
+  const q = { quoted: { key: m.key, message: m.message } };
+  const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading MP3...*\n\n🎵 *${top.title}*` }, q);
+  try {
+    const dl = await downloadAudio(top.url, { quality: '5' });
+    await conn.sendMessage(m.from, { delete: status.key }).catch(() => null);
+    if (dl.thumbnail) {
+      await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard({ ...dl, url: top.url }) }, q);
+    }
+    await sendFile(conn, m, dl.file, 'audio', null, {
+      mimetype: 'audio/mpeg',
+      fileName: `${(dl.title || top.title).replace(/[^\w\s-]/g, '').trim()}.mp3`,
+      ptt: false,
+    });
+    await m.React('✅');
+  } catch (err) {
+    await conn.sendMessage(m.from, { delete: status?.key }).catch(() => null);
+    await m.React('❌');
+    await m.reply(`❌ *Audio Download Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
+  }
+}
+
+// ─── Download video and send ─────────────────────────────────────────────────
+async function doVideoDownload(conn, m, top) {
+  const q = { quoted: { key: m.key, message: m.message } };
+  const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading Video...*\n\n🎵 *${top.title}*` }, q);
+  try {
+    const dl = await downloadVideo(top.url, { quality: '720', maxSize: '100m' });
+    await conn.sendMessage(m.from, { delete: status.key }).catch(() => null);
+    await sendFile(conn, m, dl.file, 'video', buildCard({ ...dl, url: top.url }), {
+      mimetype: 'video/mp4',
+      fileName: `${(dl.title || top.title).replace(/[^\w\s-]/g, '').trim()}.mp4`,
+    });
+    await m.React('✅');
+  } catch (err) {
+    await conn.sendMessage(m.from, { delete: status?.key }).catch(() => null);
+    await m.React('❌');
+    await m.reply(`❌ *Video Download Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
+  }
+}
+
 const downloader = async (m, conn) => {
   if (!m.body) return;
+
+  // ─── Button tap handler: play_audio / play_video ─────────────────────────
+  if (m.selectedId && ['play_audio', 'play_video'].includes(m.selectedId)) {
+    const cached = global._playCache?.get(m.from + ':' + m.sender);
+    if (!cached) {
+      return m.reply(`❌ No recent search. Use ${p}play <song name> first.\n\n> ${config.BOT_NAME}`);
+    }
+    if (m.selectedId === 'play_audio') {
+      await m.React('🎵');
+      await doAudioDownload(conn, m, cached.top);
+    } else {
+      await m.React('🎬');
+      await doVideoDownload(conn, m, cached.top);
+    }
+    return;
+  }
+
   const body = m.body.trim();
   if (!body.startsWith(config.PREFIX)) return;
   const args = body.slice(config.PREFIX.length).trim().split(/\s+/);
@@ -48,7 +111,7 @@ const downloader = async (m, conn) => {
   const q    = args.slice(1).join(' ');
   const quoted = { quoted: { key: m.key, message: m.message } };
 
-  // ─── PLAY (search YouTube + show audio/video choice buttons) ────────────
+  // ─── PLAY (search YouTube + show interactive audio/video buttons) ─────────
   if (['play', 'music', 'song', 'pl'].includes(cmd)) {
     if (!q) return m.reply(
 `▶️ *Play Music*
@@ -63,10 +126,7 @@ Examples:
 > ${config.BOT_NAME}`);
 
     await m.React('🔍');
-
-    const searching = await conn.sendMessage(m.from, {
-      text: `🔍 *Searching...*\n\n_"${q}"_`,
-    }, quoted);
+    const searching = await conn.sendMessage(m.from, { text: `🔍 *Searching...*\n\n_"${q}"_` }, quoted);
 
     try {
       const results = await ytSearch(q, 1);
@@ -84,22 +144,22 @@ Examples:
         `🔗 ${top.url}`,
         ``,
         `Choose format below:`,
-        `┣ 🎵 Audio  — sends MP3`,
-        `┣ 🎬 Video  — sends MP4`,
-        ``,
-        `> ${config.BOT_NAME}`,
       ].filter(l => l !== null).join('\n');
 
-      const imgUrl = top.thumbnail || `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
+      const imgUrl = top.thumbnail ||
+        `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
 
-      await conn.sendMessage(m.from, {
+      await sendButtons(conn, m.from, {
+        title: `🎵 ${config.BOT_NAME}`,
+        text: card,
+        footer: config.BOT_NAME,
         image: { url: imgUrl },
-        caption: card,
-      }, { quoted: m.raw || undefined }).catch(() =>
-        conn.sendMessage(m.from, { text: card }, { quoted: m.raw || undefined })
-      );
+        buttons: [
+          { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎵 Audio MP3', id: 'play_audio' }) },
+          { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎬 Video MP4', id: 'play_video' }) },
+        ],
+      });
 
-      // Cache the search result so playaudio/playvideo can pick it up
       if (!global._playCache) global._playCache = new Map();
       global._playCache.set(m.from + ':' + m.sender, { top, q, ts: Date.now() });
 
@@ -112,38 +172,17 @@ Examples:
     return;
   }
 
-  // ─── PLAY AUDIO (button shortcut from .play) ────────────────────────────
+  // ─── PLAY AUDIO (direct, also usable as button fallback) ─────────────────
   if (['playaudio', 'plaudio', 'pa'].includes(cmd)) {
-    const query = q || (() => {
-      if (!global._playCache) return null;
-      const cached = global._playCache.get(m.from + ':' + m.sender);
-      return cached ? cached.q : null;
-    })();
+    const query = q || global._playCache?.get(m.from + ':' + m.sender)?.q;
     if (!query) return m.reply(`❌ Usage: ${p}playaudio <song name>\n\n> ${config.BOT_NAME}`);
     await m.React('🎵');
     const searching2 = await conn.sendMessage(m.from, { text: `🔍 *Searching...*\n\n_"${query}"_` }, quoted);
     try {
       const results2 = await ytSearch(query, 1);
       if (!results2.length) throw new Error('No results found');
-      const top2 = results2[0];
-      await conn.sendMessage(m.from, {
-        text: `⬇️ *Downloading MP3...*\n\n🎵 *${top2.title}*`,
-        edit: searching2.key,
-      }).catch(() => null);
-      const dl2 = await downloadAudio(top2.url, { quality: '5' });
       await conn.sendMessage(m.from, { delete: searching2.key }).catch(() => null);
-      if (dl2.thumbnail) {
-        await conn.sendMessage(m.from, {
-          image: { url: dl2.thumbnail },
-          caption: buildCard({ ...dl2, url: top2.url }, 'YouTube'),
-        }, quoted);
-      }
-      await sendFile(conn, m, dl2.file, 'audio', null, {
-        mimetype: 'audio/mpeg',
-        fileName: `${(dl2.title || top2.title).replace(/[^\w\s-]/g, '').trim()}.mp3`,
-        ptt: false,
-      });
-      await m.React('✅');
+      await doAudioDownload(conn, m, results2[0]);
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching2?.key }).catch(() => null);
       await m.React('❌');
@@ -152,31 +191,17 @@ Examples:
     return;
   }
 
-  // ─── PLAY VIDEO (button shortcut from .play) ────────────────────────────
+  // ─── PLAY VIDEO (direct) ─────────────────────────────────────────────────
   if (['playvideo', 'plvideo', 'pv'].includes(cmd)) {
-    const query = q || (() => {
-      if (!global._playCache) return null;
-      const cached = global._playCache.get(m.from + ':' + m.sender);
-      return cached ? cached.q : null;
-    })();
+    const query = q || global._playCache?.get(m.from + ':' + m.sender)?.q;
     if (!query) return m.reply(`❌ Usage: ${p}playvideo <song name>\n\n> ${config.BOT_NAME}`);
     await m.React('🎬');
     const searching3 = await conn.sendMessage(m.from, { text: `🔍 *Searching...*\n\n_"${query}"_` }, quoted);
     try {
       const results3 = await ytSearch(query, 1);
       if (!results3.length) throw new Error('No results found');
-      const top3 = results3[0];
-      await conn.sendMessage(m.from, {
-        text: `⬇️ *Downloading video...*\n\n🎵 *${top3.title}*`,
-        edit: searching3.key,
-      }).catch(() => null);
-      const dl3 = await downloadVideo(top3.url, { quality: '720', maxSize: '100m' });
       await conn.sendMessage(m.from, { delete: searching3.key }).catch(() => null);
-      await sendFile(conn, m, dl3.file, 'video', buildCard({ ...dl3, url: top3.url }, 'YouTube'), {
-        mimetype: 'video/mp4',
-        fileName: `${(dl3.title || top3.title).replace(/[^\w\s-]/g, '').trim()}.mp4`,
-      });
-      await m.React('✅');
+      await doVideoDownload(conn, m, results3[0]);
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching3?.key }).catch(() => null);
       await m.React('❌');
@@ -185,7 +210,7 @@ Examples:
     return;
   }
 
-  // ─── YOUTUBE SEARCH (show 5 results) ─────────────────────────────────────
+  // ─── YOUTUBE SEARCH ───────────────────────────────────────────────────────
   if (['yts', 'ytsearch', 'searchyt', 'ytsong'].includes(cmd)) {
     if (!q) return m.reply(`❌ Usage: ${p}yts <search query>\n\n> ${config.BOT_NAME}`);
     await m.React('🔍');
@@ -213,32 +238,23 @@ ${list}
     return;
   }
 
-  // ─── YOUTUBE MP3 (by URL or name) ────────────────────────────────────────
+  // ─── YOUTUBE MP3 ─────────────────────────────────────────────────────────
   if (['ytmp3', 'ytaudio', 'yt2mp3', 'ytmusic'].includes(cmd)) {
     if (!q) return m.reply(`❌ Usage: ${p}ytmp3 <YouTube URL or song name>\n\nExamples:\n• ${p}ytmp3 https://youtu.be/dQw4w9WgXcQ\n• ${p}ytmp3 never gonna give you up\n\n> ${config.BOT_NAME}`);
     await m.React('🎵');
-
     let url = q;
-    let searchMeta = null;
-
-    // If not a URL, search first
     if (!q.includes('youtu')) {
       await m.reply(`🔍 *Searching YouTube...*`);
       const results = await ytSearch(q, 1);
-      if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found for "${q}"\n\n> ${config.BOT_NAME}`); }
+      if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found.\n\n> ${config.BOT_NAME}`); }
       url = results[0].url;
-      searchMeta = results[0];
     }
-
     await m.reply(`⬇️ *Downloading MP3...*`);
     try {
       const dl = await downloadAudio(url, { quality: '5' });
-      const card = buildCard({ ...dl, url }, 'YouTube');
-
       if (dl.thumbnail) {
-        await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: card }, quoted);
+        await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard({ ...dl, url }) }, quoted);
       }
-
       await sendFile(conn, m, dl.file, 'audio', null, {
         mimetype: 'audio/mpeg',
         fileName: `${(dl.title || 'audio').replace(/[^\w\s-]/g, '').trim()}.mp3`,
@@ -252,11 +268,10 @@ ${list}
     return;
   }
 
-  // ─── YOUTUBE MP4 (by URL or name) ────────────────────────────────────────
+  // ─── YOUTUBE MP4 ─────────────────────────────────────────────────────────
   if (['ytmp4', 'ytvideo', 'yt2mp4', 'ytv'].includes(cmd)) {
-    if (!q) return m.reply(`❌ Usage: ${p}ytmp4 <YouTube URL or name>\n\nExamples:\n• ${p}ytmp4 https://youtu.be/dQw4w9WgXcQ\n• ${p}ytmp4 faded alan walker\n\n> ${config.BOT_NAME}`);
+    if (!q) return m.reply(`❌ Usage: ${p}ytmp4 <YouTube URL or name>\n\n> ${config.BOT_NAME}`);
     await m.React('🎬');
-
     let url = q;
     if (!q.includes('youtu')) {
       await m.reply(`🔍 *Searching YouTube...*`);
@@ -264,13 +279,10 @@ ${list}
       if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found.\n\n> ${config.BOT_NAME}`); }
       url = results[0].url;
     }
-
     await m.reply(`⬇️ *Downloading 720p video...*`);
     try {
       const dl = await downloadVideo(url, { quality: '720', maxSize: '100m' });
-      const card = buildCard({ ...dl, url }, 'YouTube');
-
-      await sendFile(conn, m, dl.file, 'video', card, {
+      await sendFile(conn, m, dl.file, 'video', buildCard({ ...dl, url }), {
         mimetype: 'video/mp4',
         fileName: `${(dl.title || 'video').replace(/[^\w\s-]/g, '').trim()}.mp4`,
       });
@@ -284,7 +296,7 @@ ${list}
 
   // ─── TIKTOK ──────────────────────────────────────────────────────────────
   if (['tiktok', 'tt', 'ttdl', 'tiktokdl'].includes(cmd)) {
-    if (!q || !q.includes('tiktok')) return m.reply(`❌ Usage: ${p}tiktok <TikTok URL>\n\nExample: ${p}tiktok https://www.tiktok.com/@user/video/...\n\n> ${config.BOT_NAME}`);
+    if (!q || !q.includes('tiktok')) return m.reply(`❌ Usage: ${p}tiktok <TikTok URL>\n\n> ${config.BOT_NAME}`);
     await m.React('🎵');
     await m.reply(`⬇️ *Downloading TikTok (no watermark)...*`);
     try {
@@ -307,10 +319,8 @@ ${list}
     await m.React('📸');
     await m.reply(`⬇️ *Downloading Instagram post...*`);
     try {
-      // Try video first, fallback to any format
       const dl = await downloadVideo(q, { quality: 'best' }).catch(() => null)
               || await downloadAudio(q).then(a => ({ ...a, isAudio: true }));
-
       if (dl.isAudio) {
         await sendFile(conn, m, dl.file, 'audio', `📸 *Instagram Downloaded!*\n\n> ${config.BOT_NAME}`, { mimetype: 'audio/mpeg', fileName: 'instagram.mp3' });
       } else {
@@ -356,38 +366,28 @@ ${list}
     return;
   }
 
-  // ─── SPOTIFY (search YouTube, download as MP3) ───────────────────────────
+  // ─── SPOTIFY ─────────────────────────────────────────────────────────────
   if (['spotify', 'sp', 'spotdl', 'spmusic'].includes(cmd)) {
-    if (!q) return m.reply(`❌ Usage: ${p}spotify <song name or Spotify URL>\n\nExample: ${p}spotify blinding lights weeknd\n\n> ${config.BOT_NAME}`);
+    if (!q) return m.reply(`❌ Usage: ${p}spotify <song name or Spotify URL>\n\n> ${config.BOT_NAME}`);
     await m.React('💚');
-
     let searchQuery = q;
-    // If it's a Spotify URL, extract the track name via title
     if (q.includes('spotify.com/track')) {
       await m.reply(`🔍 *Getting Spotify track info...*`);
-      try {
-        const info = await getInfo(q);
-        searchQuery = info.title || q;
-      } catch { /* use URL as search query */ }
+      try { const info = await getInfo(q); searchQuery = info.title || q; } catch {}
     }
-
     await m.reply(`🔍 *Searching YouTube for "${searchQuery}"...*`);
     try {
       const results = await ytSearch(searchQuery, 1);
       if (!results.length) throw new Error('Track not found on YouTube');
       const top = results[0];
-
       await m.reply(`⬇️ *Downloading...*`);
       const dl = await downloadAudio(top.url, { quality: '5' });
-
-      // Thumbnail card
       if (dl.thumbnail || top.thumbnail) {
         await conn.sendMessage(m.from, {
           image: { url: dl.thumbnail || top.thumbnail },
           caption: buildCard({ ...dl, url: top.url }, 'Spotify → YouTube'),
         }, quoted);
       }
-
       await sendFile(conn, m, dl.file, 'audio', null, {
         mimetype: 'audio/mpeg',
         fileName: `${(dl.title || searchQuery).replace(/[^\w\s-]/g, '').trim()}.mp3`,
@@ -411,7 +411,6 @@ ${list}
       if (dl) {
         await sendFile(conn, m, dl.file, 'video', `📌 *Pinterest Downloaded!*\n\n> ${config.BOT_NAME}`, { mimetype: 'video/mp4', fileName: 'pinterest.mp4' });
       } else {
-        // It might be an image — get info and send thumbnail
         const info = await getInfo(q);
         if (info.thumbnail) {
           await conn.sendMessage(m.from, { image: { url: info.thumbnail }, caption: `📌 *Pinterest Image!*\n\n> ${config.BOT_NAME}` }, quoted);
@@ -465,13 +464,11 @@ ${list}
     if (!q || !q.includes('mediafire')) return m.reply(`❌ Usage: ${p}mediafire <MediaFire URL>\n\n> ${config.BOT_NAME}`);
     await m.React('📦');
     try {
-      // Scrape the direct download link from MediaFire page
       const { default: axios } = await import('axios');
       const res = await axios.get(q, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 15000 });
       const match = res.data.match(/href="(https:\/\/download\d*\.mediafire\.com[^"]+)"/);
       if (!match) throw new Error('Direct download link not found');
-      const directUrl = match[1];
-      await m.reply(`📦 *MediaFire Direct Link*\n\n🔗 ${directUrl}\n\n_Click to download_\n\n> ${config.BOT_NAME}`);
+      await m.reply(`📦 *MediaFire Direct Link*\n\n🔗 ${match[1]}\n\n_Click to download_\n\n> ${config.BOT_NAME}`);
       await m.React('✅');
     } catch (err) {
       await m.React('❌');
@@ -506,64 +503,12 @@ ${list}
     try {
       const match = q.match(/\/d\/([a-zA-Z0-9_-]+)/);
       if (!match) throw new Error('Invalid Google Drive URL format');
-      const fileId = match[1];
-      const directLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
-      await m.reply(`📁 *Google Drive Download Link*\n\n🔗 ${directLink}\n\n_Note: Large files need to confirm download in browser_\n\n> ${config.BOT_NAME}`);
+      const directLink = `https://drive.google.com/uc?export=download&id=${match[1]}`;
+      await m.reply(`📁 *Google Drive Direct Link*\n\n🔗 ${directLink}\n\n_Note: Large files may require login_\n\n> ${config.BOT_NAME}`);
       await m.React('✅');
     } catch (err) {
       await m.React('❌');
       await m.reply(`❌ *Google Drive Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
-    }
-    return;
-  }
-
-  // ─── GITHUB CLONE ────────────────────────────────────────────────────────
-  if (['gitclone', 'gc', 'ghclone'].includes(cmd)) {
-    if (!q || !q.includes('github')) return m.reply(`❌ Usage: ${p}gitclone <GitHub repo URL>\n\nExample: ${p}gitclone https://github.com/user/repo\n\n> ${config.BOT_NAME}`);
-    await m.React('💻');
-    try {
-      const match = q.match(/github\.com\/([^/]+)\/([^/\s?#]+)/);
-      if (!match) throw new Error('Invalid GitHub URL');
-      const [, user, repo] = match;
-      const branch = 'main';
-      const zipUrl = `https://github.com/${user}/${repo}/archive/refs/heads/${branch}.zip`;
-      const altZip = `https://github.com/${user}/${repo}/archive/refs/heads/master.zip`;
-
-      await m.reply(`💻 *GitHub Clone Links*\n\n📁 *Repo:* ${user}/${repo.replace('.git', '')}\n\n🔗 *Main branch:*\n${zipUrl}\n\n🔗 *Master branch:*\n${altZip}\n\n> ${config.BOT_NAME}`);
-      await m.React('✅');
-    } catch (err) {
-      await m.React('❌');
-      await m.reply(`❌ *GitHub Clone Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
-    }
-    return;
-  }
-
-  // ─── AUTO DETECT (AIO) ───────────────────────────────────────────────────
-  if (['aio', 'download', 'dl', 'get'].includes(cmd)) {
-    if (!q || !q.startsWith('http')) return m.reply(`❌ Usage: ${p}aio <any URL>\n\nSupports: YouTube, TikTok, Instagram, Facebook, Twitter, Pinterest, SoundCloud, Vimeo, Reddit, and 1000+ more.\n\n> ${config.BOT_NAME}`);
-    await m.React('⬇️');
-    await m.reply(`⬇️ *Auto-detecting and downloading...*`);
-    try {
-      // Try video first
-      let dl;
-      try {
-        dl = await downloadVideo(q, { quality: '720' });
-        if (dl.thumbnail) {
-          await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard(dl, 'URL') }, quoted);
-        }
-        await sendFile(conn, m, dl.file, 'video', null, { mimetype: 'video/mp4', fileName: 'media.mp4' });
-      } catch {
-        // Fallback to audio
-        dl = await downloadAudio(q, { quality: '5' });
-        if (dl.thumbnail) {
-          await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard(dl, 'URL') }, quoted);
-        }
-        await sendFile(conn, m, dl.file, 'audio', null, { mimetype: 'audio/mpeg', fileName: 'audio.mp3', ptt: false });
-      }
-      await m.React('✅');
-    } catch (err) {
-      await m.React('❌');
-      await m.reply(`❌ *Download Failed*\n\n${err.message}\n\nMake sure the URL is public and supported.\n\n> ${config.BOT_NAME}`);
     }
     return;
   }
