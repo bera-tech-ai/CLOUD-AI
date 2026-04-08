@@ -10,8 +10,7 @@
 import config from '../config.cjs';
 import axios from 'axios';
 import { resolveLid } from '../lib/Serializer.js';
-import pkg from '@whiskeysockets/baileys';
-const { downloadMediaMessage } = pkg;
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 
 const p = config.PREFIX;
 const SRA = 'https://some-random-api.com/canvas';
