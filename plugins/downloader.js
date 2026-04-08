@@ -39,12 +39,22 @@ async function sendFile(conn, m, file, type, caption, meta) {
   }
 }
 
+// ─── Keep WA connection alive during long downloads (prevents 408 timeout) ───
+function startKeepalive(conn, jid) {
+  const timer = setInterval(() => {
+    conn.sendPresenceUpdate('recording', jid).catch(() => {});
+  }, 20000);
+  return () => clearInterval(timer);
+}
+
 // ─── Download audio and send ─────────────────────────────────────────────────
 async function doAudioDownload(conn, m, top) {
   const q = { quoted: { key: m.key, message: m.message } };
   const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading MP3...*\n\n🎵 *${top.title}*` }, q);
+  const stopKeepalive = startKeepalive(conn, m.from);
   try {
     const dl = await downloadAudio(top.url, { quality: '5' });
+    stopKeepalive();
     await conn.sendMessage(m.from, { delete: status.key }).catch(() => null);
     if (dl.thumbnail) {
       await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard({ ...dl, url: top.url }) }, q);
@@ -56,6 +66,7 @@ async function doAudioDownload(conn, m, top) {
     });
     await m.React('✅');
   } catch (err) {
+    stopKeepalive();
     await conn.sendMessage(m.from, { delete: status?.key }).catch(() => null);
     await m.React('❌');
     await m.reply(`❌ *Audio Download Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
@@ -66,8 +77,10 @@ async function doAudioDownload(conn, m, top) {
 async function doVideoDownload(conn, m, top) {
   const q = { quoted: { key: m.key, message: m.message } };
   const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading Video...*\n\n🎵 *${top.title}*` }, q);
+  const stopKeepalive = startKeepalive(conn, m.from);
   try {
     const dl = await downloadVideo(top.url, { quality: '720', maxSize: '100m' });
+    stopKeepalive();
     await conn.sendMessage(m.from, { delete: status.key }).catch(() => null);
     await sendFile(conn, m, dl.file, 'video', buildCard({ ...dl, url: top.url }), {
       mimetype: 'video/mp4',
@@ -75,6 +88,7 @@ async function doVideoDownload(conn, m, top) {
     });
     await m.React('✅');
   } catch (err) {
+    stopKeepalive();
     await conn.sendMessage(m.from, { delete: status?.key }).catch(() => null);
     await m.React('❌');
     await m.reply(`❌ *Video Download Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
