@@ -87,7 +87,10 @@ const downloader = async (m, conn) => {
 
   // ─── Button tap handler: play_audio / play_video ─────────────────────────
   if (m.selectedId && ['play_audio', 'play_video'].includes(m.selectedId)) {
-    const cached = global._playCache?.get(m.from + ':' + m.sender);
+    // Try all JID variations since the tap response JID may differ from the send JID
+    const cached = global._playCache?.get(m.from + ':' + m.sender)
+      || global._playCache?.get((m.realJid || m.from) + ':' + m.sender)
+      || global._playCache?.get(m.sender + ':' + m.sender);
     if (!cached) {
       return m.reply(`❌ No recent search. Use ${p}play <song name> first.\n\n> ${config.BOT_NAME}`);
     }
@@ -146,7 +149,9 @@ Examples:
       const imgUrl = top.thumbnail ||
         `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
 
-      await sendBtn(conn, m.from, {
+      // Use m.realJid (real phone JID, not @lid) so interactive buttons route correctly
+      const targetJid = m.realJid || m.from;
+      await sendBtn(conn, targetJid, {
         title: `🎵 ${config.BOT_NAME}`,
         body: card,
         footer: config.BOT_NAME,
@@ -158,7 +163,7 @@ Examples:
       }, m);
 
       if (!global._playCache) global._playCache = new Map();
-      global._playCache.set(m.from + ':' + m.sender, { top, q, ts: Date.now() });
+      global._playCache.set(targetJid + ':' + m.sender, { top, q, ts: Date.now() });
 
       await m.React('✅');
     } catch (err) {
