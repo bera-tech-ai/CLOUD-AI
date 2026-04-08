@@ -44,11 +44,13 @@ import techPlugin from './plugins/tech.js';
 import funPlugin from './plugins/fun.js';
 import infoPlugin from './plugins/info.js';
 import photoPlugin from './plugins/photo.js';
+import beraPlugin from './plugins/bera.js';
 import { onGroupUpdate } from './plugins/welcome.js';
 import { handleCall } from './plugins/anticall.js';
 import btnmenuPlugin from './plugins/btnmenu.js';
 
 const ALL_PLUGINS = [
+  beraPlugin,   // MUST be first — rewrites m.body before other plugins run
   btnmenuPlugin,
   generalPlugin, aiPlugin, imaginePlugin, animePlugin, photoPlugin,
   downloaderPlugin, converterPlugin, toolsPlugin, extraPlugin,
