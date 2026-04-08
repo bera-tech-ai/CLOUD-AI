@@ -1,45 +1,107 @@
 /**
  * Photo Effects Plugin
- * Applies visual effects to profile pictures, quoted images, or AI-generated art.
+ * Applies visual effects to profile pictures or quoted images.
  *
- * Effect APIs:
- *   - some-random-api.com/canvas — blur, greyscale, invert, sepia, jail, wasted, triggered, glass, comrade, circle
- *   - Pollinations AI           — galaxy (AI cosmic art)
- *   - popcat.xyz               — blur, greyscale, invert (fallback)
+ * APIs:
+ *   - some-random-api.com/canvas — filters, overlays, shapes, misc
+ *   - Pollinations AI            — galaxy / cosmic AI art
  */
 
 import config from '../config.cjs';
 import axios from 'axios';
+import { resolveLid } from '../lib/Serializer.js';
+import pkg from '@whiskeysockets/baileys';
+const { downloadMediaMessage } = pkg;
 
 const p = config.PREFIX;
+const SRA = 'https://some-random-api.com/canvas';
 
-// ─── API HELPERS ─────────────────────────────────────────────────────────────
-
-const SRA_BASE = 'https://some-random-api.com/canvas';
-
-// Each entry: { label, apiUrl(imgUrl) }
+// ─── ALL EFFECTS ─────────────────────────────────────────────────────────────
 const EFFECTS = {
   // Filters
-  blur:       { label: '🌫️ Blur',        api: (u) => `${SRA_BASE}/filter/blur?avatar=${encodeURIComponent(u)}` },
-  greyscale:  { label: '⚫ Greyscale',    api: (u) => `${SRA_BASE}/filter/greyscale?avatar=${encodeURIComponent(u)}` },
-  grey:       { label: '⚫ Greyscale',    api: (u) => `${SRA_BASE}/filter/greyscale?avatar=${encodeURIComponent(u)}` },
-  invert:     { label: '🔄 Invert',       api: (u) => `${SRA_BASE}/filter/invert?avatar=${encodeURIComponent(u)}` },
-  sepia:      { label: '🟤 Sepia',        api: (u) => `${SRA_BASE}/filter/sepia?avatar=${encodeURIComponent(u)}` },
+  blur:       { label: '🌫️ Blur',        api: (u) => `${SRA}/filter/blur?avatar=${enc(u)}` },
+  greyscale:  { label: '⚫ Greyscale',    api: (u) => `${SRA}/filter/greyscale?avatar=${enc(u)}` },
+  grey:       { label: '⚫ Greyscale',    api: (u) => `${SRA}/filter/greyscale?avatar=${enc(u)}` },
+  invert:     { label: '🔄 Invert',       api: (u) => `${SRA}/filter/invert?avatar=${enc(u)}` },
+  sepia:      { label: '🟤 Sepia',        api: (u) => `${SRA}/filter/sepia?avatar=${enc(u)}` },
+  pixelate:   { label: '🔲 Pixelate',     api: (u) => `${SRA}/filter/pixelate?avatar=${enc(u)}` },
+  mirror:     { label: '🪞 Mirror',       api: (u) => `${SRA}/filter/mirror?avatar=${enc(u)}` },
+  flip:       { label: '🔃 Flip',         api: (u) => `${SRA}/filter/flip?avatar=${enc(u)}` },
+  brighten:   { label: '☀️ Brighten',     api: (u) => `${SRA}/filter/brighten?avatar=${enc(u)}` },
+  darken:     { label: '🌑 Darken',       api: (u) => `${SRA}/filter/darken?avatar=${enc(u)}` },
   // Overlays
-  jail:       { label: '🔒 Jail',         api: (u) => `${SRA_BASE}/overlay/jail?avatar=${encodeURIComponent(u)}` },
-  wasted:     { label: '💀 Wasted',       api: (u) => `${SRA_BASE}/overlay/wasted?avatar=${encodeURIComponent(u)}` },
-  triggered:  { label: '😡 Triggered',    api: (u) => `${SRA_BASE}/overlay/triggered?avatar=${encodeURIComponent(u)}` },
-  glass:      { label: '🔮 Glass',        api: (u) => `${SRA_BASE}/overlay/glass?avatar=${encodeURIComponent(u)}` },
-  comrade:    { label: '☭ Comrade',       api: (u) => `${SRA_BASE}/overlay/comrade?avatar=${encodeURIComponent(u)}` },
-  // Shape
-  circle:     { label: '⭕ Circle',       api: (u) => `${SRA_BASE}/misc/circle?avatar=${encodeURIComponent(u)}` },
+  jail:       { label: '🔒 Jail',         api: (u) => `${SRA}/overlay/jail?avatar=${enc(u)}` },
+  wasted:     { label: '💀 Wasted',       api: (u) => `${SRA}/overlay/wasted?avatar=${enc(u)}` },
+  triggered:  { label: '😡 Triggered',    api: (u) => `${SRA}/overlay/triggered?avatar=${enc(u)}` },
+  glass:      { label: '🔮 Glass',        api: (u) => `${SRA}/overlay/glass?avatar=${enc(u)}` },
+  comrade:    { label: '☭ Comrade',       api: (u) => `${SRA}/overlay/comrade?avatar=${enc(u)}` },
+  gay:        { label: '🏳️‍🌈 Gay Pride',   api: (u) => `${SRA}/overlay/gay?avatar=${enc(u)}` },
+  // Shape / Misc
+  circle:     { label: '⭕ Circle',       api: (u) => `${SRA}/misc/circle?avatar=${enc(u)}` },
+  simpcard:   { label: '🃏 Simp Card',    api: (u) => `${SRA}/misc/simpcard?avatar=${enc(u)}` },
+  horny:      { label: '😈 Horny Card',   api: (u) => `${SRA}/misc/horny?avatar=${enc(u)}` },
+  lolice:     { label: '👮 Lolice Card',  api: (u) => `${SRA}/misc/lolice?avatar=${enc(u)}` },
 };
 
-// Galaxy — AI art (Pollinations AI, not profile-pic based)
-const GALAXY_MODELS = [
-  (q) => `https://image.pollinations.ai/prompt/${encodeURIComponent('galaxy ' + q + ', cosmic nebula space art, stunning, vivid colors, ultra detailed, photorealistic')}?width=1024&height=1024&model=flux&nologo=true&enhance=true`,
-  (q) => `https://image.pollinations.ai/prompt/${encodeURIComponent('galaxy ' + q + ', cosmic space nebula, stars, vivid, beautiful')}?width=1024&height=1024&model=flux&nologo=true`,
-];
+function enc(u) { return encodeURIComponent(u); }
+
+// ─── IMAGE SOURCE RESOLVER ────────────────────────────────────────────────────
+async function getImageUrl(m, conn) {
+  // 1. Quoted image — download and upload to get a public URL
+  if (m.quoted) {
+    const qtype = m.quoted.type || '';
+    if (['imageMessage', 'stickerMessage'].includes(qtype)) {
+      try {
+        const buf = await downloadMediaMessage(
+          { message: m.quoted.message, key: m.quoted.key },
+          'buffer', {}
+        );
+        const url = await uploadToTmpfiles(buf);
+        if (url) return url;
+      } catch (_) {}
+    }
+  }
+
+  // 2. Mentioned user's profile pic — resolve @lid first
+  if (m.mentionedJid && m.mentionedJid.length > 0) {
+    const rawJid = m.mentionedJid[0];
+    const jid = resolveLid(rawJid) || rawJid;
+    try {
+      return await conn.profilePictureUrl(jid, 'image');
+    } catch (_) {}
+  }
+
+  // 3. Sender's own profile pic — resolve @lid for groups
+  const senderJid = resolveLid(m.sender) || m.sender;
+  try {
+    return await conn.profilePictureUrl(senderJid, 'image');
+  } catch (_) {}
+
+  throw new Error(
+    `Could not get a photo!\n` +
+    `• Reply to a photo with ${p}${m.body?.split(' ')[0]?.replace(p,'') || 'blur'}\n` +
+    `• Or tag someone: ${p}wasted @user\n` +
+    `• Or make your profile pic public in WA Privacy settings`
+  );
+}
+
+// Upload buffer to tmpfiles.org to get a public URL
+async function uploadToTmpfiles(buf) {
+  try {
+    const FormData = (await import('form-data')).default;
+    const form = new FormData();
+    form.append('file', buf, { filename: 'photo.jpg', contentType: 'image/jpeg' });
+    const res = await axios.post('https://tmpfiles.org/api/v1/upload', form, {
+      headers: form.getHeaders(),
+      timeout: 20000,
+    });
+    const raw = res.data?.data?.url;
+    if (!raw) return null;
+    return raw.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+  } catch (_) {
+    return null;
+  }
+}
 
 async function fetchImageBuffer(url) {
   const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 45000, maxRedirects: 5 });
@@ -48,168 +110,82 @@ async function fetchImageBuffer(url) {
   return Buffer.from(res.data);
 }
 
-async function getSourceImageUrl(m, conn) {
-  // 1. Quoted image message
-  if (m.quoted) {
-    const q = m.quoted;
-    const mime = q.mimeType || q.mimetype || '';
-    if (mime.startsWith('image')) {
-      try {
-        const buf = await q.download();
-        // Upload to a temp CDN via Pollinations image cache (or use a tourl approach)
-        // Since we need a URL, use telegra.ph or just send with the buffer directly
-        return { buffer: buf };
-      } catch (_) { /* fallthrough to profile pic */ }
-    }
-  }
-
-  // 2. Mentioned user's profile pic
-  if (m.mentionedJid && m.mentionedJid.length > 0) {
-    const jid = m.mentionedJid[0];
-    try {
-      const url = await conn.profilePictureUrl(jid, 'image');
-      return { url };
-    } catch (_) { /* fallthrough */ }
-  }
-
-  // 3. Sender's profile pic
+// ─── SEND HELPER — avoids m.reply timeout in groups ──────────────────────────
+async function send(conn, m, content) {
   try {
-    const url = await conn.profilePictureUrl(m.sender, 'image');
-    return { url };
-  } catch (_) { /* fallthrough */ }
-
-  throw new Error('No image found. Reply to an image, mention someone, or make sure your profile picture is public.');
+    await conn.sendMessage(m.from, content);
+  } catch (err) {
+    console.error('[PHOTO SEND ERR]', err?.message);
+  }
 }
 
+// ─── MAIN PLUGIN ─────────────────────────────────────────────────────────────
 const photo = async (m, conn) => {
   if (!m.body) return;
   const body = m.body.trim();
   if (!body.startsWith(p)) return;
-  const args = body.slice(p.length).trim().split(/\s+/);
-  const cmd  = args[0].toLowerCase();
-  const q    = args.slice(1).join(' ');
+  const args  = body.slice(p.length).trim().split(/\s+/);
+  const cmd   = args[0].toLowerCase();
+  const q     = args.slice(1).join(' ');
 
-  // ─── GALAXY ─────────────────────────────────────────────────────────────
+  // ─── GALAXY / COSMIC AI ART ────────────────────────────────────────────────
   if (['galaxy', 'galaxyart', 'cosmic', 'space', 'nebula'].includes(cmd)) {
     const prompt = q || 'beautiful galaxy';
     await m.React('🌌');
-    await m.reply(`🌌 *Generating galaxy art...*\n✏️ _"${prompt}"_\n\n⏳ Please wait 15-30 seconds...`);
-    try {
-      for (const modelUrl of GALAXY_MODELS) {
-        try {
-          const buf = await fetchImageBuffer(modelUrl(prompt));
-          await conn.sendMessage(m.from, {
-            image: buf,
-            caption: `🌌 *Galaxy Art Generated!*\n\n✏️ *Theme:* ${prompt}\n✨ *Style:* Cosmic Nebula AI\n\n> ${config.BOT_NAME}`,
-          }, { quoted: { key: m.key, message: m.message } });
-          await m.React('✅');
-          return;
-        } catch (_) { /* try next model */ }
-      }
-      throw new Error('All models failed');
-    } catch (err) {
-      await m.React('❌');
-      await m.reply(`❌ Galaxy art failed!\n\n💡 Try: ${p}galaxy starry night\n\n> ${config.BOT_NAME}`);
+    await send(conn, m, { text: `🌌 *Generating galaxy art...*\n✏️ _"${prompt}"_\n\n⏳ Please wait 15-30 seconds...` });
+    const models = [
+      `https://image.pollinations.ai/prompt/${enc('galaxy ' + prompt + ', cosmic nebula space art, stunning, vivid colors, ultra detailed, photorealistic')}?width=1024&height=1024&model=flux&nologo=true&enhance=true`,
+      `https://image.pollinations.ai/prompt/${enc('galaxy ' + prompt + ', cosmic space nebula, stars, vivid, beautiful')}?width=1024&height=1024&model=flux&nologo=true`,
+    ];
+    for (const url of models) {
+      try {
+        const buf = await fetchImageBuffer(url);
+        await conn.sendMessage(m.from, {
+          image: buf,
+          caption: `🌌 *Galaxy Art*\n✏️ *Theme:* ${prompt}\n\n> ${config.BOT_NAME}`,
+        });
+        await m.React('✅');
+        return;
+      } catch (_) {}
     }
+    await m.React('❌');
+    await send(conn, m, { text: `❌ Galaxy art failed! Try: ${p}galaxy starry night\n\n> ${config.BOT_NAME}` });
     return;
   }
 
-  // ─── PHOTO EFFECTS ───────────────────────────────────────────────────────
+  // ─── PHOTO EFFECTS ─────────────────────────────────────────────────────────
   if (!EFFECTS[cmd]) return;
 
   const effect = EFFECTS[cmd];
   await m.React('🎨');
-  await m.reply(`${effect.label} *Applying effect...*\n\n⏳ Please wait...`);
+  await send(conn, m, { text: `${effect.label} *Applying effect...*\n⏳ Please wait...` });
 
   try {
-    const source = await getSourceImageUrl(m, conn);
-
-    let imageBuffer;
-
-    if (source.buffer) {
-      // Quoted image: we have the buffer but need a URL for the API.
-      // Upload to tmpfiles.org for a temp URL
-      try {
-        const form = new FormData();
-        const { Blob } = await import('buffer');
-        form.append('file', new Blob([source.buffer], { type: 'image/jpeg' }), 'photo.jpg');
-        const upload = await axios.post('https://tmpfiles.org/api/v1/upload', form, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 30000,
-        });
-        const tmpUrl = upload.data?.data?.url?.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
-        if (tmpUrl) {
-          imageBuffer = await fetchImageBuffer(effect.api(tmpUrl));
-        }
-      } catch (_) {
-        // If upload fails, apply the popcat blur directly on the buffer as fallback
-        imageBuffer = source.buffer;
-      }
-    } else {
-      imageBuffer = await fetchImageBuffer(effect.api(source.url));
-    }
+    const imgUrl = await getImageUrl(m, conn);
+    const apiUrl = effect.api(imgUrl);
+    const buf    = await fetchImageBuffer(apiUrl);
 
     await conn.sendMessage(m.from, {
-      image: imageBuffer,
-      caption: `${effect.label} *Effect Applied!*\n\n> ${config.BOT_NAME}`,
-    }, { quoted: { key: m.key, message: m.message } });
+      image: buf,
+      caption: `${effect.label} *Done!*\n\n> ${config.BOT_NAME}`,
+    });
     await m.React('✅');
 
   } catch (err) {
     await m.React('❌');
-    const usage = [
-      `❌ *Failed:* ${err.message?.slice(0, 80)}`,
-      ``,
-      `💡 *Tips:*`,
-      `• Reply to an image with ${p}${cmd}`,
-      `• Or mention someone: ${p}${cmd} @user`,
-      `• Or just send ${p}${cmd} to apply to your own profile pic`,
-      ``,
-      `> ${config.BOT_NAME}`,
-    ].join('\n');
-    await m.reply(usage);
+    await send(conn, m, {
+      text: [
+        `❌ *Failed:* ${err.message?.slice(0, 120)}`,
+        ``,
+        `💡 *How to use:*`,
+        `• Reply to a photo: reply then send ${p}${cmd}`,
+        `• Tag someone: ${p}${cmd} @user`,
+        `• Or just send ${p}${cmd} alone (uses your profile pic)`,
+        ``,
+        `> ${config.BOT_NAME}`,
+      ].join('\n'),
+    });
   }
-};
-
-// ─── PHOTO MENU ─────────────────────────────────────────────────────────────
-photo.menu = async (m) => {
-  const effectList = Object.entries(EFFECTS)
-    .filter(([k]) => k !== 'grey') // skip alias
-    .map(([k, v]) => `  ⟡ ${p}${k} — ${v.label}`).join('\n');
-
-  await m.reply([
-    `╔═══════════════════════════╗`,
-    `║  🎨  *PHOTO EFFECTS*       ║`,
-    `╚═══════════════════════════╝`,
-    ``,
-    `*How to use:*`,
-    `• Reply to a photo with the command`,
-    `• Or mention someone: ${p}blur @user`,
-    `• Or just send it to apply to your own profile pic`,
-    ``,
-    `*🖼️ FILTERS*`,
-    `  ⟡ ${p}blur — Blur effect`,
-    `  ⟡ ${p}greyscale — Black & white`,
-    `  ⟡ ${p}invert — Invert colors`,
-    `  ⟡ ${p}sepia — Vintage tone`,
-    ``,
-    `*🎭 OVERLAYS*`,
-    `  ⟡ ${p}jail — Prison bars`,
-    `  ⟡ ${p}wasted — GTA Wasted screen`,
-    `  ⟡ ${p}triggered — Triggered meme`,
-    `  ⟡ ${p}glass — Broken glass`,
-    `  ⟡ ${p}comrade — Soviet filter`,
-    ``,
-    `*✂️ SHAPE*`,
-    `  ⟡ ${p}circle — Crop to circle`,
-    ``,
-    `*🌌 AI ART*`,
-    `  ⟡ ${p}galaxy <theme> — Cosmic galaxy art`,
-    `  ⟡ ${p}cosmic <theme> — Same as galaxy`,
-    `  ⟡ ${p}nebula <theme> — Same as galaxy`,
-    ``,
-    `> ${config.BOT_NAME}`,
-  ].join('\n'));
 };
 
 export default photo;
