@@ -9,7 +9,6 @@ import {
   useMultiFileAuthState,
   getContentType,
   downloadMediaMessage,
-  makeInMemoryStore,
 } from '@whiskeysockets/baileys';
 import { Handler, Callupdate } from './data/handler.js';
 import { lidMap } from './lib/Serializer.js';
@@ -43,13 +42,16 @@ import settingsPlugin from './plugins/settings.js';
 import techPlugin from './plugins/tech.js';
 import funPlugin from './plugins/fun.js';
 import infoPlugin from './plugins/info.js';
+import photoPlugin from './plugins/photo.js';
+import beraPlugin from './plugins/bera.js';
 import { onGroupUpdate } from './plugins/welcome.js';
 import { handleCall } from './plugins/anticall.js';
 import btnmenuPlugin from './plugins/btnmenu.js';
 
 const ALL_PLUGINS = [
+  beraPlugin,   // MUST be first — rewrites m.body before other plugins run
   btnmenuPlugin,
-  generalPlugin, aiPlugin, imaginePlugin, animePlugin,
+  generalPlugin, aiPlugin, imaginePlugin, animePlugin, photoPlugin,
   downloaderPlugin, converterPlugin, toolsPlugin, extraPlugin,
   groupPlugin, ownerPlugin, searchPlugin, gamesPlugin, settingsPlugin,
   techPlugin, funPlugin, infoPlugin,
@@ -61,6 +63,7 @@ const PORT = parseInt(process.env.PORT) || 3000;
 const lime = chalk.bold.hex('#32CD32');
 const orange = chalk.bold.hex('#FFA500');
 let initialConnection = true;
+let reconnectAttempts = 0;
 const msgRetryCounterCache = new NodeCache();
 const messageStore = new Map();
 
@@ -85,8 +88,8 @@ console.log = suppress(_origLog);
 console.error = suppress(_origErr);
 console.warn = suppress(_origWarn);
 
-// ─── In-memory store (auto-handles LID → JID resolution) ───
-const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+// ─── Simple contacts store (makeInMemoryStore removed in baileys@6.7.21) ───
+const store = { contacts: {} };
 
 // ─── Global crash guard — prevents any internal Baileys error from killing the process ───
 process.on('uncaughtException', (err) => {
@@ -170,27 +173,40 @@ async function connectToWhatsApp() {
     downloadMediaMessage,
   });
 
-  // ─── Bind store to connection (handles LID→JID auto-mapping) ───
-  store.bind(conn.ev);
+  // ─── Populate simple store contacts from events ───
+  conn.ev.on('contacts.upsert', (contacts) => {
+    for (const c of contacts) {
+      if (c.id) store.contacts[c.id] = c;
+    }
+  });
+  conn.ev.on('contacts.update', (updates) => {
+    for (const u of updates) {
+      if (u.id) store.contacts[u.id] = { ...(store.contacts[u.id] || {}), ...u };
+    }
+  });
 
   // ─── Connection Updates ───
-  let reconnectAttempts = 0;
   conn.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
-      const reason = lastDisconnect?.error?.output?.payload?.error || '';
 
       if (code === DisconnectReason.loggedOut || code === 401) {
         _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and re-linking via pairing code...'));
         try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
         try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+        reconnectAttempts = 0;
         initialConnection = true;
         setTimeout(() => connectToWhatsApp(), 3000);
         return;
-      } else if (code === 440 || code === 408 || code === 503) {
-        // 440 = stream error / conflict — exponential backoff
+      } else if (code === 440) {
+        // 440 = stream conflict — wait 60s to let WhatsApp fully clear the old session
+        reconnectAttempts++;
+        const wait440 = reconnectAttempts <= 3 ? 60000 : Math.min(60000 * reconnectAttempts, 300000);
+        _origLog(chalk.yellow(`⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440/1000)}s for WA to settle...`));
+        setTimeout(() => connectToWhatsApp(), wait440);
+      } else if (code === 408 || code === 503) {
         reconnectAttempts++;
         const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 60000);
         _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
@@ -204,6 +220,7 @@ async function connectToWhatsApp() {
     }
 
     if (connection === 'open') {
+      reconnectAttempts = 0;
       if (initialConnection) {
         initialConnection = false;
         const botNum = conn.user?.id?.split(':')[0];
@@ -219,6 +236,18 @@ async function connectToWhatsApp() {
           await conn.sendMessage(selfJid, {
             text: `╔══════════════════════╗\n║  *${config.BOT_NAME}* Online ✅  ║\n╚══════════════════════╝\n\n🤖 *Bot:* ${config.BOT_NAME}\n📱 *Number:* ${botNum}\n📶 *Mode:* ${config.MODE}\n👑 *Owner:* ${config.OWNER_NAME}\n🕒 *Time:* ${moment().tz('Africa/Nairobi').format('HH:mm:ss DD/MM/YYYY')}\n\n_Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           });
+        } catch (_) {}
+
+        // Resolve owner's phone → @lid JID for group isOwner detection
+        try {
+          const ownerPhone = config.OWNER_NUMBER + '@s.whatsapp.net';
+          const results = await conn.onWhatsApp(config.OWNER_NUMBER);
+          const ownerInfo = Array.isArray(results) ? results[0] : results;
+          if (ownerInfo?.jid && ownerInfo.jid !== ownerPhone) {
+            lidMap.set(ownerInfo.jid, ownerPhone);   // @lid → phone JID
+            lidMap.set(ownerPhone, ownerInfo.jid);   // phone JID → @lid (reverse)
+            _origLog(lime(`🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`));
+          }
         } catch (_) {}
       }
     }
