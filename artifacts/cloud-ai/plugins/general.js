@@ -287,19 +287,31 @@ const SUBMENUS = {
       `║  👑  *OWNER COMMANDS*      ║`,
       `╚═══════════════════════════╝`,
       '',
-      `${p}block @user — Block User`,
-      `${p}unblock <num> — Unblock User`,
-      `${p}broadcast <msg> — Broadcast Message`,
+      `*🤖 Bot Management*`,
       `${p}setname <name> — Change Bot Name`,
       `${p}setbio <text> — Change Bot Bio`,
       `${p}setpp — Change Bot Profile Photo`,
       `${p}restart — Restart Bot`,
+      `${p}shutdown — Shut Down Bot`,
       `${p}eval <code> — Run JS Code`,
+      '',
+      `*📢 Communication*`,
+      `${p}broadcast <msg> — Broadcast to All Chats`,
+      `${p}block @user — Block User`,
+      `${p}unblock <num> — Unblock User`,
       `${p}report <msg> — Send Report to Dev`,
+      '',
+      `*🚀 BeraHost Deploy*`,
+      `${p}setapi <key> — Set BeraHost API Key`,
+      `${p}setapiurl <url> — Set BeraHost API URL`,
+      `${p}berahost — List Available Bots`,
+      `${p}deploy <botId> <SESSION> — Deploy a Bot`,
+      `${p}deploystatus <id> — Check Deployment Status`,
+      `${p}mydeployments — List Your Deployments`,
     ].join('\n'),
     buttons: [
-      { text: `${p}settings`, id: `${p}settings` },
-      { text: `${p}broadcast <msg>`, id: `${p}broadcast example` },
+      { text: `${p}setapi`, id: `${p}setapi` },
+      { text: `${p}deploy`, id: `${p}berahost` },
       { text: `${p}restart`, id: `${p}restart` },
     ],
   },
@@ -519,7 +531,7 @@ ${cat('👥 𝙂𝙍𝙊𝙐𝙋', ['add','kick','promote','demote','mute','unmu
 ${cat('⚙️ 𝙎𝙀𝙏𝙏𝙄𝙉𝙂𝙎', ['settings','setmode','setprefix','anticall','autotyping','antidelete','autoreact','autoread','setonline','statusseen','antilink'])}
 
 
-${cat('👑 𝙊𝙒𝙉𝙀𝙍', ['broadcast','block','unblock','setname','setbio','setpp','restart','eval','report'])}
+${cat('👑 𝙊𝙒𝙉𝙀𝙍', ['broadcast','block','unblock','setname','setbio','setpp','restart','eval','report','setapi','setapiurl','deploy','deploystatus','mydeployments','berahost'])}
 
 
 ◈━━━━━[ 🤖 𝘽𝙀𝙍𝘼 𝘼𝙄 𝘼𝙎𝙎𝙄𝙎𝙏𝘼𝙉𝙏 ]━━━━━◈
