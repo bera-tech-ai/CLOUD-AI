@@ -14,7 +14,7 @@ const owner = async (m, conn, { isOwner }) => {
   const q = args.slice(1).join(' ');
 
   // Owner-only commands guard
-  const ownerCmds = ['block','unblock','broadcast','setname','setbio','setpp','fullpp','restart','eval','shutdown','addsudo','delsudo','getsudo','clearsudo'];
+  const ownerCmds = ['block','unblock','broadcast','setname','setbio','setpp','fullpp','restart','eval','shutdown','addsudo','delsudo','getsudo','clearsudo','setapi','setapiurl','setberakey','setapikey','berakey','setberaurl','beraapiurl','setberahost'];
   if (ownerCmds.includes(cmd) && !isOwner) {
     return m.reply('❌ *Owner Only Command!*\n\nThis command can only be used by the bot owner.');
   }
@@ -155,6 +155,44 @@ const owner = async (m, conn, { isOwner }) => {
     await m.reply('🔄 *Restarting bot...*\n\nPlease wait, the bot will be back shortly!');
     await m.React('🔄');
     setTimeout(() => process.exit(0), 2000);
+    return;
+  }
+
+  // ─── SET BERAHOST API KEY ───
+  if (['setapi', 'setberakey', 'setapikey', 'berakey'].includes(cmd)) {
+    if (!q) return m.reply(
+      `❌ *Usage:* ${config.PREFIX}setapi <your_api_key>\n\n` +
+      `*Example:*\n${config.PREFIX}setapi bh_abc123yourkey\n\n` +
+      `💡 Get your API key from the BeraHost platform\n\n> ${config.BOT_NAME}`
+    );
+    await m.React('🔑');
+    config.setState('BERAHOST_KEY', q.trim());
+    await m.reply(
+      `✅ *BeraHost API Key Updated!*\n\n` +
+      `🔑 *Key:* \`${q.trim().slice(0, 8)}...${q.trim().slice(-4)}\`\n` +
+      `🌐 *API URL:* ${config.BERAHOST_API}\n\n` +
+      `💡 You can now use ${config.PREFIX}deploy to deploy bots\n\n> ${config.BOT_NAME}`
+    );
+    await m.React('✅');
+    return;
+  }
+
+  // ─── SET BERAHOST API URL ───
+  if (['setapiurl', 'setberaurl', 'beraapiurl', 'setberahost'].includes(cmd)) {
+    if (!q) return m.reply(
+      `❌ *Usage:* ${config.PREFIX}setapiurl <url>\n\n` +
+      `*Example:*\n${config.PREFIX}setapiurl https://berahost.example.com\n\n` +
+      `📌 *Current URL:* ${config.BERAHOST_API}\n\n> ${config.BOT_NAME}`
+    );
+    const url = q.trim().replace(/\/$/, '');
+    await m.React('🌐');
+    config.setState('BERAHOST_API', url);
+    await m.reply(
+      `✅ *BeraHost API URL Updated!*\n\n` +
+      `🌐 *New URL:* ${url}\n\n` +
+      `💡 Run ${config.PREFIX}berahost to test the connection\n\n> ${config.BOT_NAME}`
+    );
+    await m.React('✅');
     return;
   }
 
