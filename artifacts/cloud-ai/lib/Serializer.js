@@ -131,21 +131,35 @@ export async function serialize(msg, conn) {
   m._rawMsg = msg; // always kept for non-quoted uses
 
   // ─── Reply helper ───────────────────────────────────────────────────────────
-  // Sends to m.from (works with both @lid and @s.whatsapp.net in baileys-pro).
-  // NOTE: quoted replies are DISABLED in groups — baileys-pro times out when
-  //       encoding group quoted context. Only use quoted in DMs.
+  // For DMs: use m.sender (resolved via senderPn) not m.from (which may be @lid).
+  // For groups: use m.from (group JID). Never quote in groups (causes timeouts).
   m.reply = async (text, options = {}) => {
-    const target = m.from;
-    // Only use quoted in DMs (not groups) and only when safe
+    const target = m.isGroup ? m.from : m.sender;
+
+    // Helper: send with a 10s timeout so @lid hangs don't block the bot
+    const sendSafe = (jid, payload, quotedMsg) => {
+      const sendPromise = quotedMsg
+        ? conn.sendMessage(jid, payload, { quoted: quotedMsg })
+        : conn.sendMessage(jid, payload);
+      return Promise.race([
+        sendPromise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timed Out')), 10000)),
+      ]);
+    };
+
+    // DMs only: try with quoted first (if safe)
     if (!m.isGroup && canQuote) {
-      try {
-        return await conn.sendMessage(target, { text: String(text), ...options }, { quoted: msg });
-      } catch (_) {}
+      try { return await sendSafe(target, { text: String(text), ...options }, msg); } catch (_) {}
     }
-    // Plain send — used for all group messages and DM fallback
+
+    // Plain send (groups always, DM fallback)
     try {
-      return await conn.sendMessage(target, { text: String(text), ...options });
+      return await sendSafe(target, { text: String(text), ...options });
     } catch (err) {
+      // If m.sender also failed (still @lid), try m.from as last resort
+      if (target !== m.from) {
+        try { return await sendSafe(m.from, { text: String(text), ...options }); } catch (_) {}
+      }
       console.error('[REPLY ERROR]', err?.message);
     }
   };
