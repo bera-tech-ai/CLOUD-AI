@@ -10,7 +10,21 @@ export async function Handler(conn, m, plugins) {
     const hasMedia = ['stickerMessage','imageMessage','videoMessage','audioMessage','documentMessage'].includes(msg.type);
     if (!msg.body && !hasMedia) return;
 
-    // Resolve @lid sender to real phone JID (WhatsApp multi-device uses @lid in groups)
+    // Resolve @lid sender → real phone JID (WhatsApp multi-device uses @lid in groups)
+    // If the sender lid isn't in the map yet, fetch group participants to populate it
+    if (msg.sender?.endsWith('@lid') && !lidMap.get(msg.sender) && msg.isGroup) {
+      try {
+        const meta = await conn.groupMetadata(msg.from);
+        for (const p of meta.participants) {
+          const lid = p.lid || p.lidJid;
+          const id = p.id || p.jid;
+          if (lid && id && !id.endsWith('@lid')) {
+            lidMap.set(lid, id);
+            lidMap.set(id, lid);
+          }
+        }
+      } catch (_) {}
+    }
     const resolvedSender = (msg.sender?.endsWith('@lid') && lidMap.get(msg.sender)) || msg.sender;
 
     const ownerJids = [
