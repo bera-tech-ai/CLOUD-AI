@@ -50,18 +50,21 @@ function startKeepalive(conn, jid) {
 // ─── Download audio and send ─────────────────────────────────────────────────
 async function doAudioDownload(conn, m, top) {
   const q = { quoted: { key: m.key, message: m.message } };
-  const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading MP3...*\n\n🎵 *${top.title}*` }, q);
+  const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading Audio...*\n\n🎵 *${top.title}*` }, q);
   const stopKeepalive = startKeepalive(conn, m.from);
   try {
-    const dl = await downloadAudio(top.url, { quality: '5' });
+    // Pass pre-fetched meta so downloadAudio skips the redundant getInfo() call
+    const dl = await downloadAudio(top.url, { meta: top });
     stopKeepalive();
     await conn.sendMessage(m.from, { delete: status.key }).catch(() => null);
     if (dl.thumbnail) {
       await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard({ ...dl, url: top.url }) }, q);
     }
+    const ext  = dl.ext || 'm4a';
+    const mime = ext === 'webm' ? 'audio/webm' : ext === 'ogg' ? 'audio/ogg' : 'audio/mp4';
     await sendFile(conn, m, dl.file, 'audio', null, {
-      mimetype: 'audio/mpeg',
-      fileName: `${(dl.title || top.title).replace(/[^\w\s-]/g, '').trim()}.mp3`,
+      mimetype: mime,
+      fileName: `${(dl.title || top.title).replace(/[^\w\s-]/g, '').trim()}.${ext}`,
       ptt: false,
     });
     await m.React('✅');
@@ -79,7 +82,8 @@ async function doVideoDownload(conn, m, top) {
   const status = await conn.sendMessage(m.from, { text: `⬇️ *Downloading Video...*\n\n🎵 *${top.title}*` }, q);
   const stopKeepalive = startKeepalive(conn, m.from);
   try {
-    const dl = await downloadVideo(top.url, { quality: '720', maxSize: '100m' });
+    // Pass pre-fetched meta so downloadVideo skips the redundant getInfo() call
+    const dl = await downloadVideo(top.url, { meta: top, maxSize: '100m' });
     stopKeepalive();
     await conn.sendMessage(m.from, { delete: status.key }).catch(() => null);
     await sendFile(conn, m, dl.file, 'video', buildCard({ ...dl, url: top.url }), {
