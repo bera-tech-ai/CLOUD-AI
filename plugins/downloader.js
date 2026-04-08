@@ -1,7 +1,6 @@
 import config from '../config.cjs';
 import fs from 'fs';
 import { downloadAudio, downloadVideo, ytSearch, getInfo } from '../lib/ytdlp.js';
-import { sendBtn } from '../lib/sendBtn.js';
 
 const p = config.PREFIX;
 
@@ -85,28 +84,6 @@ async function doVideoDownload(conn, m, top) {
 const downloader = async (m, conn) => {
   if (!m.body) return;
 
-  // ─── Button tap handler: play_audio / play_video ─────────────────────────
-  if (m.selectedId) {
-    console.log('[BTN TAP]', m.selectedId, '| from:', m.from, '| sender:', m.sender, '| realJid:', m.realJid);
-  }
-  if (m.selectedId && ['play_audio', 'play_video'].includes(m.selectedId)) {
-    // Try all JID variations since the tap response JID may differ from the send JID
-    const cached = global._playCache?.get(m.from + ':' + m.sender)
-      || global._playCache?.get((m.realJid || m.from) + ':' + m.sender)
-      || global._playCache?.get(m.sender + ':' + m.sender);
-    if (!cached) {
-      return m.reply(`❌ No recent search. Use ${p}play <song name> first.\n\n> ${config.BOT_NAME}`);
-    }
-    if (m.selectedId === 'play_audio') {
-      await m.React('🎵');
-      await doAudioDownload(conn, m, cached.top);
-    } else {
-      await m.React('🎬');
-      await doVideoDownload(conn, m, cached.top);
-    }
-    return;
-  }
-
   const body = m.body.trim();
   if (!body.startsWith(config.PREFIX)) return;
   const args = body.slice(config.PREFIX.length).trim().split(/\s+/);
@@ -114,10 +91,10 @@ const downloader = async (m, conn) => {
   const q    = args.slice(1).join(' ');
   const quoted = { quoted: { key: m.key, message: m.message } };
 
-  // ─── PLAY (search YouTube + show interactive audio/video buttons) ─────────
+  // ─── PLAY — search YouTube and download MP3 directly ──────────────────────
   if (['play', 'music', 'song', 'pl'].includes(cmd)) {
     if (!q) return m.reply(
-`▶️ *Play Music*
+`🎵 *Play Music*
 
 Usage: ${p}play <song name>
 
@@ -125,6 +102,8 @@ Examples:
 • ${p}play faded alan walker
 • ${p}play bad bunny un verano sin ti
 • ${p}play diamonds rihanna
+
+💡 For video: ${p}pv <song name>
 
 > ${config.BOT_NAME}`);
 
@@ -138,6 +117,9 @@ Examples:
 
       await conn.sendMessage(m.from, { delete: searching.key }).catch(() => null);
 
+      const imgUrl = top.thumbnail ||
+        `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
+
       const card = [
         `🎵 *${top.title || 'Unknown'}*`,
         `━━━━━━━━━━━━━━━━━━━━━`,
@@ -146,41 +128,45 @@ Examples:
         top.views ? `👁️ *Views:* ${fmtViews(top.views)}` : null,
         `🔗 ${top.url}`,
         ``,
-        `Choose format below:`,
+        `⬇️ _Downloading MP3..._`,
       ].filter(l => l !== null).join('\n');
 
-      const imgUrl = top.thumbnail ||
-        `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
-
-      const targetJid = m.realJid || m.from;
-
-      // Send the song card as a regular image message first (always visible)
-      await conn.sendMessage(targetJid, {
+      // Show song card with thumbnail
+      await conn.sendMessage(m.from, {
         image: { url: imgUrl },
         caption: card,
-      }, { quoted: { key: m.key, message: m.message } }).catch(() =>
-        conn.sendMessage(targetJid, { text: card }, { quoted: { key: m.key, message: m.message } })
+      }, quoted).catch(() =>
+        conn.sendMessage(m.from, { text: card }, quoted)
       );
 
-      // Send interactive buttons separately (no image — avoids upload issues)
-      await sendBtn(conn, targetJid, {
-        title: `🎵 ${config.BOT_NAME}`,
-        body: `👇 *Choose your format:*`,
-        footer: config.BOT_NAME,
-        buttons: [
-          { id: 'play_audio', text: '🎵 Audio MP3' },
-          { id: 'play_video', text: '🎬 Video MP4' },
-        ],
-      }, m);
-
-      if (!global._playCache) global._playCache = new Map();
-      global._playCache.set(targetJid + ':' + m.sender, { top, q, ts: Date.now() });
-
-      await m.React('✅');
+      // Download and send MP3 directly
+      await doAudioDownload(conn, m, top);
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching?.key }).catch(() => null);
       await m.React('❌');
       await m.reply(`❌ *Play Failed*\n\n${err.message}\n\nTry: ${p}play faded alan walker\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── PV — search YouTube and download MP4 video directly ──────────────────
+  if (['pv', 'playvid', 'musicvideo', 'mv'].includes(cmd)) {
+    if (!q) return m.reply(`🎬 Usage: ${p}pv <song name>\n\nExample: ${p}pv faded alan walker\n\n> ${config.BOT_NAME}`);
+
+    await m.React('🔍');
+    const searching = await conn.sendMessage(m.from, { text: `🔍 *Searching...*\n\n_"${q}"_` }, quoted);
+
+    try {
+      const results = await ytSearch(q, 1);
+      if (!results.length) throw new Error('No results found for that query');
+      const top = results[0];
+
+      await conn.sendMessage(m.from, { delete: searching.key }).catch(() => null);
+      await doVideoDownload(conn, m, top);
+    } catch (err) {
+      await conn.sendMessage(m.from, { delete: searching?.key }).catch(() => null);
+      await m.React('❌');
+      await m.reply(`❌ *Video Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
     }
     return;
   }
