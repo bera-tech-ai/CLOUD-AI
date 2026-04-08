@@ -1,10 +1,7 @@
 import config from '../config.cjs';
 import fs from 'fs';
 import { downloadAudio, downloadVideo, ytSearch, getInfo } from '../lib/ytdlp.js';
-import { createRequire } from 'module';
-
-const _require = createRequire(import.meta.url);
-const { sendButtons } = _require('gifted-btns');
+import { sendBtn } from '../lib/sendBtn.js';
 
 const p = config.PREFIX;
 
@@ -149,16 +146,16 @@ Examples:
       const imgUrl = top.thumbnail ||
         `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
 
-      await sendButtons(conn, m.from, {
+      await sendBtn(conn, m.from, {
         title: `🎵 ${config.BOT_NAME}`,
-        text: card,
+        body: card,
         footer: config.BOT_NAME,
-        image: { url: imgUrl },
+        image: imgUrl,
         buttons: [
-          { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎵 Audio MP3', id: 'play_audio' }) },
-          { name: 'quick_reply', buttonParamsJson: JSON.stringify({ display_text: '🎬 Video MP4', id: 'play_video' }) },
+          { id: 'play_audio', text: '🎵 Audio MP3' },
+          { id: 'play_video', text: '🎬 Video MP4' },
         ],
-      });
+      }, m);
 
       if (!global._playCache) global._playCache = new Map();
       global._playCache.set(m.from + ':' + m.sender, { top, q, ts: Date.now() });
