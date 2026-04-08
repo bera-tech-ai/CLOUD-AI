@@ -18,8 +18,8 @@ const config = {
   MODE:              _state.MODE || process.env.MODE || "public",
   VERSION:           "3.2.0",
   TIMEZONE:          "Africa/Nairobi",
-  BERAHOST_API:      "https://bot-deployment-platform.replit.app",
-  BERAHOST_KEY:      "bh_fff4fe54c28760d78f587eca840f9d29ffc707eba0c9e3d1",
+  BERAHOST_API:      _state.BERAHOST_API || process.env.BERAHOST_API || "https://bot-deployment-platform.replit.app",
+  BERAHOST_KEY:      _state.BERAHOST_KEY || process.env.BERAHOST_KEY || "bh_fff4fe54c28760d78f587eca840f9d29ffc707eba0c9e3d1",
 
   // ── Status automation ──
   AUTO_STATUS_SEEN:    process.env.AUTO_STATUS_SEEN  !== undefined ? process.env.AUTO_STATUS_SEEN  === "true" : true,
