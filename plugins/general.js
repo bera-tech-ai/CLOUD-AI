@@ -73,13 +73,15 @@ const SUBMENUS = {
       `${p}terabox — TeraBox File`,
       `${p}gdrive — Google Drive File`,
       `${p}aio — Auto Detect Downloader`,
-      `${p}play — Search & Play Music`,
+      `${p}play — Search & choose Audio/Video`,
+      `${p}playaudio — Download as MP3 directly`,
+      `${p}playvideo — Download as MP4 directly`,
       `${p}gitclone — Clone GitHub Repo`,
     ].join('\n'),
     buttons: [
       { text: `${p}ytmp3 <url/name>`, id: `${p}ytmp3 faded alan walker` },
       { text: `${p}tiktok <url>`, id: `${p}tiktok example` },
-      { text: `${p}spotify <song>`, id: `${p}spotify blinding lights` },
+      { text: `${p}play <song>`, id: `${p}play faded alan walker` },
     ],
   },
   convert: {
