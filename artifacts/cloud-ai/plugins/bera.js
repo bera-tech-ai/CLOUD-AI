@@ -19,13 +19,13 @@ const p = config.PREFIX;
 
 // ─── GREETINGS (when user just types "bera" alone) ───────────────────────────
 const GREETINGS = [
-  `Sawa boss, niambie nifanye nini? 🫡`,
-  `Karibu! Niambie command unataka, sir. 🤖`,
-  `Ndio boss, toa order yako. ✅`,
-  `Ready! Nikusaidie nini leo? 🙌`,
-  `Simama hapa — niambie unataka nifanye nini, sir. 🫡`,
-  `Niambie tu, nitafanya. Niko tayari! ⚡`,
-  `Speak to me, boss. Nifanye nini? 🤖`,
+  `Ready and waiting, sir. What can I do for you? 🫡`,
+  `At your service! Tell me what you need, boss. 🤖`,
+  `I'm listening, sir. Give me a command. ✅`,
+  `Ready! What would you like me to do? 🙌`,
+  `Standing by — tell me what you need, sir. 🫡`,
+  `Just say the word and I'll handle it. Ready! ⚡`,
+  `Speak to me, boss. What do you need? 🤖`,
 ];
 
 function randomGreeting() {
@@ -357,12 +357,14 @@ function extractCommand(raw, fallback) {
 const EXEC_MESSAGES = [
   `Executing your command, sir 🫡`,
   `On it, boss ⚡`,
-  `Sawa mkubwa, inakuja... 🙌`,
-  `Ndio sir, nakufanyia sasa hivi 🤖`,
-  `Roger that, boss 🫡`,
-  `Iko sawa, nakushughulikia ⚡`,
-  `Command received, sir ✅`,
-  `Fanya! Nakushughulikia hii sasa 🔥`,
+  `Right away, sir 🙌`,
+  `Consider it done, boss 🤖`,
+  `Roger that, sir 🫡`,
+  `Command received, handling it now ⚡`,
+  `Got it, sir ✅`,
+  `Processing your request now 🔥`,
+  `Understood, sir — working on it 🤖`,
+  `Leave it to me, boss ⚡`,
 ];
 
 function randomExec() {
@@ -383,18 +385,19 @@ const bera = async (m, conn) => {
       text: [
         `🤖 *Bera AI Assistant*`,
         ``,
-        `Mambo${name}! Niambie nifanye nini, sir. 🫡`,
+        `Hey${name}! Tell me what command you want executed, sir. 🫡`,
         ``,
-        `*Mfano wa commands:*`,
+        `*Example commands:*`,
         `• _bera play faded alan walker_`,
         `• _bera what's the weather in Nairobi_`,
         `• _bera generate a galaxy with wolves_`,
-        `• _bera nipigie joke_`,
+        `• _bera tell me a joke_`,
         `• _bera translate hello to swahili_`,
-        `• _bera open this view once_ ← reply to view-once`,
-        `• _bera make sticker_ ← reply to image`,
+        `• _bera open this view once_ ← reply to view-once msg`,
+        `• _bera make a sticker_ ← reply to image`,
+        `• _bera piga muziki juice wrld_ ← Sheng works too`,
         ``,
-        `_Ninaelewa English, Sheng na Swahili_ 😎`,
+        `_I understand English, Sheng and Swahili commands_ 😎`,
         ``,
         `> ${config.BOT_NAME} | Dev: Bruce Bera`,
       ].join('\n'),
