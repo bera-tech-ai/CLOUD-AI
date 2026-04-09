@@ -208,7 +208,7 @@ async function connectToWhatsApp() {
     generateHighQualityLinkPreview: true,
     syncFullHistory: false,
     downloadMediaMessage,
-    keepAliveIntervalMs: 10000,   // aggressive keep-alive survives decrypt flood
+    keepAliveIntervalMs: 5000,    // aggressive keep-alive survives decrypt flood
     connectTimeoutMs: 60000,      // give extra time for initial burst
     // Return stored message or undefined — prevents retry receipts flooding WA for old encrypted msgs
     getMessage: async (key) => {
@@ -418,8 +418,8 @@ async function connectToWhatsApp() {
         // Auto read
         if (config.AUTO_READ) await conn.readMessages([msg.key]).catch(() => {});
 
-        // Process message
-        await Handler(conn, msg, ALL_PLUGINS);
+        // Process message — fire-and-forget so the WA socket stays unblocked
+        Handler(conn, msg, ALL_PLUGINS).catch(err => _origLog(chalk.red('[HANDLER ERROR]'), err?.message));
 
       } catch (err) {
         _origLog(chalk.red('[MSG ERROR]'), err?.message);
@@ -495,10 +495,6 @@ app.get('/', (req, res) => res.json({
 app.listen(PORT, () => _origLog(lime(`🌐 Keep-alive server: port ${PORT}`)));
 
 // ─── Start ───
-// Ensure yt-dlp binary exists before connecting (downloads automatically if missing)
-ensureYtDlp()
-  .then(() => connectToWhatsApp())
-  .catch((err) => {
-    _origLog(chalk.yellow(`⚠️  yt-dlp unavailable: ${err.message} — download commands disabled`));
-    connectToWhatsApp();
-  });
+// Start yt-dlp download in background — don't block WhatsApp connection
+ensureYtDlp().catch(err => _origLog(chalk.yellow(`⚠️  yt-dlp: ${err.message}`)));
+connectToWhatsApp();
