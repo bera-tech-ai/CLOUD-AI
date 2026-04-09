@@ -1,6 +1,7 @@
 import config from '../config.cjs';
 import fs from 'fs';
-import { downloadAudio, downloadVideo, ytSearch, getInfo } from '../lib/ytdlp.js';
+import { downloadAudio, downloadVideo, ytSearch as ytdlpSearch, getInfo } from '../lib/ytdlp.js';
+import { ytmp3 as beraYtmp3, ytmp4 as beraYtmp4, tiktokDl, ytSearch as beraYtSearch } from '../lib/beraapi.js';
 
 const p = config.PREFIX;
 
@@ -45,6 +46,63 @@ function startKeepalive(conn, jid) {
     conn.sendPresenceUpdate('recording', jid).catch(() => {});
   }, 20000);
   return () => clearInterval(timer);
+}
+
+// ─── Helper: smart YouTube search (Bera API first, yt-dlp fallback) ──────────
+async function smartYtSearch(query, limit = 1) {
+  try {
+    const results = await beraYtSearch(query, limit);
+    if (results.length) return results;
+  } catch {}
+  return ytdlpSearch(query, limit);
+}
+
+// ─── Bera API audio download and send (URL stream → no disk needed) ──────────
+async function beraAudioDownload(conn, m, top) {
+  const q = { quoted: { key: m.key, message: m.message } };
+  const stop = startKeepalive(conn, m.from);
+  try {
+    const dl = await beraYtmp3(top.url || top, '128kbps');
+    stop();
+    if (dl.thumbnail) {
+      await conn.sendMessage(m.from, {
+        image: { url: dl.thumbnail },
+        caption: buildCard({ title: dl.title, uploader: 'YouTube', duration: top.duration || '?:??', views: top.views }, 'YouTube'),
+      }, q);
+    }
+    await conn.sendMessage(m.from, {
+      audio: { url: dl.download_url },
+      mimetype: 'audio/mpeg',
+      fileName: `${(dl.title || 'audio').replace(/[^\w\s-]/g, '').trim()}.mp3`,
+      ptt: false,
+    }, q);
+    await m.React('✅');
+    return true;
+  } catch (err) {
+    stop();
+    throw err;
+  }
+}
+
+// ─── Bera API video download and send ────────────────────────────────────────
+async function beraVideoDownload(conn, m, top) {
+  const q = { quoted: { key: m.key, message: m.message } };
+  const stop = startKeepalive(conn, m.from);
+  try {
+    const dl = await beraYtmp4(top.url || top, '480p');
+    stop();
+    await conn.sendMessage(m.from, {
+      video: { url: dl.download_url },
+      mimetype: 'video/mp4',
+      fileName: `${(dl.title || 'video').replace(/[^\w\s-]/g, '').trim()}.mp4`,
+      caption: buildCard({ title: dl.title, uploader: 'YouTube', duration: top.duration || '?:??' }, 'YouTube'),
+    }, q);
+    await m.React('✅');
+    return true;
+  } catch (err) {
+    stop();
+    throw err;
+  }
 }
 
 // ─── Download audio and send ─────────────────────────────────────────────────
@@ -129,14 +187,11 @@ Examples:
     const searching = await conn.sendMessage(m.from, { text: `🔍 *Searching...*\n\n_"${q}"_` }, quoted);
 
     try {
-      const results = await ytSearch(q, 1);
+      const results = await smartYtSearch(q, 1);
       if (!results.length) throw new Error('No results found for that query');
       const top = results[0];
 
       await conn.sendMessage(m.from, { delete: searching.key }).catch(() => null);
-
-      const imgUrl = top.thumbnail ||
-        `https://i.ytimg.com/vi/${top.url.split('v=')[1]}/hqdefault.jpg`;
 
       const card = [
         `🎵 *${top.title || 'Unknown'}*`,
@@ -146,19 +201,20 @@ Examples:
         top.views ? `👁️ *Views:* ${fmtViews(top.views)}` : null,
         `🔗 ${top.url}`,
         ``,
-        `⬇️ _Downloading MP3..._`,
+        `⬇️ _Downloading audio..._`,
       ].filter(l => l !== null).join('\n');
 
-      // Show song card with thumbnail
       await conn.sendMessage(m.from, {
-        image: { url: imgUrl },
+        image: { url: top.thumbnail },
         caption: card,
-      }, quoted).catch(() =>
-        conn.sendMessage(m.from, { text: card }, quoted)
-      );
+      }, quoted).catch(() => conn.sendMessage(m.from, { text: card }, quoted));
 
-      // Download and send MP3 directly
-      await doAudioDownload(conn, m, top);
+      // Try Bera API first (fast, no bot check), fallback to yt-dlp
+      try {
+        await beraAudioDownload(conn, m, top);
+      } catch {
+        await doAudioDownload(conn, m, top);
+      }
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching?.key }).catch(() => null);
       await m.React('❌');
@@ -175,12 +231,15 @@ Examples:
     const searching = await conn.sendMessage(m.from, { text: `🔍 *Searching...*\n\n_"${q}"_` }, quoted);
 
     try {
-      const results = await ytSearch(q, 1);
+      const results = await smartYtSearch(q, 1);
       if (!results.length) throw new Error('No results found for that query');
       const top = results[0];
-
       await conn.sendMessage(m.from, { delete: searching.key }).catch(() => null);
-      await doVideoDownload(conn, m, top);
+      try {
+        await beraVideoDownload(conn, m, top);
+      } catch {
+        await doVideoDownload(conn, m, top);
+      }
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching?.key }).catch(() => null);
       await m.React('❌');
@@ -227,15 +286,15 @@ Examples:
     return;
   }
 
-  // ─── YOUTUBE SEARCH ───────────────────────────────────────────────────────
+  // ─── YOUTUBE SEARCH (Bera API + yt-dlp fallback) ─────────────────────────
   if (['yts', 'ytsearch', 'searchyt', 'ytsong'].includes(cmd)) {
     if (!q) return m.reply(`❌ Usage: ${p}yts <search query>\n\n> ${config.BOT_NAME}`);
     await m.React('🔍');
     try {
-      const results = await ytSearch(q, 5);
+      const results = await smartYtSearch(q, 5);
       if (!results.length) throw new Error('No results found');
       const list = results.map((v, i) =>
-        `*${i + 1}.* ${v.title}\n    🎤 ${v.uploader} | ⏱️ ${v.duration} | 👁️ ${fmtViews(v.views)}\n    🔗 ${v.url}`
+        `*${i + 1}.* ${v.title}\n    🎤 ${v.uploader || 'Unknown'} | ⏱️ ${v.duration} | 👁️ ${fmtViews(v.views)}\n    🔗 ${v.url}`
       ).join('\n\n');
       await m.reply(
 `🔍 *YouTube Search Results*
@@ -255,75 +314,66 @@ ${list}
     return;
   }
 
-  // ─── YOUTUBE MP3 ─────────────────────────────────────────────────────────
+  // ─── YOUTUBE MP3 (Bera API → yt-dlp fallback) ────────────────────────────
   if (['ytmp3', 'ytaudio', 'yt2mp3', 'ytmusic'].includes(cmd)) {
     if (!q) return m.reply(`❌ Usage: ${p}ytmp3 <YouTube URL or song name>\n\nExamples:\n• ${p}ytmp3 https://youtu.be/dQw4w9WgXcQ\n• ${p}ytmp3 never gonna give you up\n\n> ${config.BOT_NAME}`);
     await m.React('🎵');
-    let url = q;
+    let top = { url: q, title: q, duration: '?:??' };
     if (!q.includes('youtu')) {
-      await m.reply(`🔍 *Searching YouTube...*`);
-      const results = await ytSearch(q, 1);
+      const results = await smartYtSearch(q, 1).catch(() => []);
       if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found.\n\n> ${config.BOT_NAME}`); }
-      url = results[0].url;
+      top = results[0];
     }
-    await m.reply(`⬇️ *Downloading MP3...*`);
+    const status2 = await conn.sendMessage(m.from, { text: `⬇️ *Downloading MP3...*\n\n🎵 *${top.title}*` }, quoted);
     try {
-      const dl = await downloadAudio(url, { quality: '5' });
-      if (dl.thumbnail) {
-        await conn.sendMessage(m.from, { image: { url: dl.thumbnail }, caption: buildCard({ ...dl, url }) }, quoted);
-      }
-      await sendFile(conn, m, dl.file, 'audio', null, {
-        mimetype: 'audio/mpeg',
-        fileName: `${(dl.title || 'audio').replace(/[^\w\s-]/g, '').trim()}.mp3`,
-        ptt: false,
-      });
-      await m.React('✅');
-    } catch (err) {
-      await m.React('❌');
-      await m.reply(`❌ *Download Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
+      await beraAudioDownload(conn, m, top);
+      await conn.sendMessage(m.from, { delete: status2.key }).catch(() => null);
+    } catch {
+      await conn.sendMessage(m.from, { delete: status2.key }).catch(() => null);
+      await doAudioDownload(conn, m, top);
     }
     return;
   }
 
-  // ─── YOUTUBE MP4 ─────────────────────────────────────────────────────────
+  // ─── YOUTUBE MP4 (Bera API → yt-dlp fallback) ────────────────────────────
   if (['ytmp4', 'ytvideo', 'yt2mp4', 'ytv'].includes(cmd)) {
     if (!q) return m.reply(`❌ Usage: ${p}ytmp4 <YouTube URL or name>\n\n> ${config.BOT_NAME}`);
     await m.React('🎬');
-    let url = q;
+    let top = { url: q, title: q, duration: '?:??' };
     if (!q.includes('youtu')) {
-      await m.reply(`🔍 *Searching YouTube...*`);
-      const results = await ytSearch(q, 1);
+      const results = await smartYtSearch(q, 1).catch(() => []);
       if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found.\n\n> ${config.BOT_NAME}`); }
-      url = results[0].url;
+      top = results[0];
     }
-    await m.reply(`⬇️ *Downloading 720p video...*`);
+    const status3 = await conn.sendMessage(m.from, { text: `⬇️ *Downloading Video...*\n\n🎵 *${top.title}*` }, quoted);
     try {
-      const dl = await downloadVideo(url, { quality: '720', maxSize: '100m' });
-      await sendFile(conn, m, dl.file, 'video', buildCard({ ...dl, url }), {
-        mimetype: 'video/mp4',
-        fileName: `${(dl.title || 'video').replace(/[^\w\s-]/g, '').trim()}.mp4`,
-      });
-      await m.React('✅');
-    } catch (err) {
-      await m.React('❌');
-      await m.reply(`❌ *Download Failed*\n\n${err.message}\n\nTry a shorter video.\n\n> ${config.BOT_NAME}`);
+      await beraVideoDownload(conn, m, top);
+      await conn.sendMessage(m.from, { delete: status3.key }).catch(() => null);
+    } catch {
+      await conn.sendMessage(m.from, { delete: status3.key }).catch(() => null);
+      await doVideoDownload(conn, m, top);
     }
     return;
   }
 
-  // ─── TIKTOK ──────────────────────────────────────────────────────────────
+  // ─── TIKTOK (Bera API — no watermark) ────────────────────────────────────
   if (['tiktok', 'tt', 'ttdl', 'tiktokdl'].includes(cmd)) {
-    if (!q || !q.includes('tiktok')) return m.reply(`❌ Usage: ${p}tiktok <TikTok URL>\n\n> ${config.BOT_NAME}`);
+    if (!q || !q.includes('tiktok')) return m.reply(`❌ Usage: ${p}tiktok <TikTok URL>\n\nExample: ${p}tiktok https://vm.tiktok.com/xxx\n\n> ${config.BOT_NAME}`);
     await m.React('🎵');
-    await m.reply(`⬇️ *Downloading TikTok (no watermark)...*`);
+    const status4 = await conn.sendMessage(m.from, { text: `⬇️ *Downloading TikTok (no watermark)...*` }, quoted);
     try {
-      const dl = await downloadVideo(q, { quality: 'best' });
-      await sendFile(conn, m, dl.file, 'video',
-        `🎵 *TikTok Downloaded!*\n📛 ${dl.title || 'Video'}\n\n> ${config.BOT_NAME}`,
-        { mimetype: 'video/mp4', fileName: 'tiktok.mp4' }
-      );
+      const dl = await tiktokDl(q);
+      await conn.sendMessage(m.from, { delete: status4.key }).catch(() => null);
+      const caption = `🎵 *TikTok Video*\n👤 *@${dl.author.name}*\n${dl.title ? `📝 ${dl.title}\n` : ''}⏱️ *Duration:* ${dl.duration}s\n\n> ${config.BOT_NAME}`;
+      await conn.sendMessage(m.from, {
+        video: { url: dl.video },
+        mimetype: 'video/mp4',
+        fileName: 'tiktok.mp4',
+        caption,
+      }, quoted);
       await m.React('✅');
     } catch (err) {
+      await conn.sendMessage(m.from, { delete: status4?.key }).catch(() => null);
       await m.React('❌');
       await m.reply(`❌ *TikTok Failed*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
     }
