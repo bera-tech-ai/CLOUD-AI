@@ -207,7 +207,7 @@ async function connectToWhatsApp() {
     generateHighQualityLinkPreview: true,
     syncFullHistory: false,
     downloadMediaMessage,
-    keepAliveIntervalMs: 5000,    // aggressive keep-alive survives decrypt flood
+    keepAliveIntervalMs: 30000,   // standard 30s keep-alive — avoids WA bot-detection
     connectTimeoutMs: 60000,      // give extra time for initial burst
     // Return stored message or undefined — prevents retry receipts flooding WA for old encrypted msgs
     getMessage: async (key) => {
