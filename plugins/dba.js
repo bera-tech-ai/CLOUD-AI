@@ -251,31 +251,46 @@ RULES:
 7. If a tool fails, tell the user and try an alternative or ask for clarification.`;
 }
 
-// ─── Call AI (GitHub Models — gpt-4o-mini, free with GITHUB_TOKEN) ──────────
+// ─── Call AI — tries GitHub Models → DeepSeek → error ───────────────────────
 async function callAI(messages) {
-  const token = process.env.GITHUB_TOKEN || config.GITHUB_TOKEN;
-  if (!token) throw new Error('GITHUB_TOKEN not set');
+  const ghToken  = process.env.GITHUB_TOKEN  || config.GITHUB_TOKEN;
+  const dsToken  = process.env.OPENAI_API_KEY;
 
-  const res = await axios.post(
-    'https://models.inference.ai.azure.com/chat/completions',
-    {
-      model: 'gpt-4o-mini',
-      messages,
-      max_tokens: 800,
-      temperature: 0.4,
-      response_format: { type: 'json_object' },
-    },
-    {
-      timeout: 60000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-    }
-  );
-  const raw = res.data?.choices?.[0]?.message?.content?.trim();
-  if (!raw) throw new Error('Empty AI response');
-  return JSON.parse(raw);
+  const body = (model) => ({
+    model,
+    messages,
+    max_tokens: 800,
+    temperature: 0.4,
+    response_format: { type: 'json_object' },
+  });
+
+  // 1️⃣ GitHub Models (gpt-4o-mini)
+  if (ghToken) {
+    try {
+      const res = await axios.post(
+        'https://models.inference.ai.azure.com/chat/completions',
+        body('gpt-4o-mini'),
+        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
+      );
+      const raw = res.data?.choices?.[0]?.message?.content?.trim();
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+  }
+
+  // 2️⃣ DeepSeek (OpenAI-compatible, OPENAI_API_KEY)
+  if (dsToken) {
+    try {
+      const res = await axios.post(
+        'https://api.deepseek.com/v1/chat/completions',
+        body('deepseek-chat'),
+        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsToken}` } }
+      );
+      const raw = res.data?.choices?.[0]?.message?.content?.trim();
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+  }
+
+  throw new Error('All AI backends failed — check GITHUB_TOKEN or OPENAI_API_KEY');
 }
 
 // ─── Conversation memory (per user, 12 turns) ────────────────────────────────
