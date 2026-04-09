@@ -12,7 +12,6 @@ import {
 } from '@whiskeysockets/baileys';
 import { Handler, Callupdate } from './data/handler.js';
 import { lidMap } from './lib/Serializer.js';
-import { ensureYtDlp } from './lib/ytdlp.js';
 
 import express from 'express';
 import pino from 'pino';
@@ -495,6 +494,4 @@ app.get('/', (req, res) => res.json({
 app.listen(PORT, () => _origLog(lime(`🌐 Keep-alive server: port ${PORT}`)));
 
 // ─── Start ───
-// Start yt-dlp download in background — don't block WhatsApp connection
-ensureYtDlp().catch(err => _origLog(chalk.yellow(`⚠️  yt-dlp: ${err.message}`)));
 connectToWhatsApp();
