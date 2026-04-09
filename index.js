@@ -346,10 +346,14 @@ async function connectToWhatsApp() {
       msg.message?.listResponseMessage ||
       msg.message?.templateButtonReplyMessage
     );
-    // Accept both 'notify' and 'append' — groups with @lid JIDs arrive as 'append'
+    // Accept 'notify' (normal) and 'append' (group @lid / multi-device button taps)
+    // But skip fromMe 'append' messages — those are the bot's OWN outgoing messages
     if (type !== 'notify' && type !== 'append' && !messages.some(isInteractiveResponse)) return;
 
     for (let msg of messages) {
+      // Skip the bot's own outgoing messages (fromMe append) — not user commands
+      if (msg.key?.fromMe && type === 'append' && !isInteractiveResponse(msg)) continue;
+
       try {
         // ─── Resolve @lid JIDs everywhere in the message key ───
         const tryResolveLid = (lid) => {
