@@ -406,17 +406,7 @@ Command (start with dot):`;
     } catch (_) {}
   }
 
-  // Pollinations GET fallback (no key)
-  try {
-    const res = await axios.get(
-      `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}?model=openai-fast&seed=-1`,
-      { timeout: 12000, responseType: 'text' }
-    );
-    const raw = typeof res.data === 'string' ? res.data.trim() : '';
-    if (raw) return extractCommand(raw, request);
-  } catch (_) {}
-
-  // Hard fallback
+  // Hard fallback — if both AI backends fail, treat it as .gpt
   return `${p}gpt ${request}`;
 }
 
