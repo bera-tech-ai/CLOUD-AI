@@ -270,7 +270,7 @@ async function callAI(messages) {
       const res = await axios.post(
         'https://models.inference.ai.azure.com/chat/completions',
         body('gpt-4o-mini'),
-        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
+        { timeout: 20000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
       );
       const raw = res.data?.choices?.[0]?.message?.content?.trim();
       if (raw) return JSON.parse(raw);
@@ -305,9 +305,12 @@ function addHistory(sender, role, content) {
 function clearHistory(sender) { memory.delete(sender); }
 
 // ─── Send a progress message ─────────────────────────────────────────────────
-async function sendProgress(conn, from, text, quoted) {
+async function sendProgress(conn, from, text) {
   try {
-    return await conn.sendMessage(from, { text: `🤖 ${text}` }, quoted);
+    return await Promise.race([
+      conn.sendMessage(from, { text: `🤖 ${text}` }),
+      new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 8000)),
+    ]);
   } catch { return null; }
 }
 
@@ -337,7 +340,7 @@ async function runAgent(userMessage, sender, conn, from, quoted) {
 
     // Send progress update to user
     if (message && tool !== 'done') {
-      lastProgressMsg = await sendProgress(conn, from, message, quoted);
+      lastProgressMsg = await sendProgress(conn, from, message);
     }
 
     // Build what the AI said for history
