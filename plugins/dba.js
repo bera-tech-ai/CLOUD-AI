@@ -346,7 +346,7 @@ async function runAgent(userMessage, sender, conn, from, quoted) {
 }
 
 // ─── Plugin entry point ──────────────────────────────────────────────────────
-const dba = async (m, conn) => {
+const dba = async (m, conn, { isOwner } = {}) => {
   if (!m.body) return;
   const body = m.body.trim();
   if (!body.startsWith(p)) return;
@@ -392,8 +392,7 @@ I'm your intelligent assistant. Just talk to me naturally and I'll get things do
     return m.reply(`🗑️ *Conversation cleared!*\n\nI've forgotten our previous chat. Fresh start!\n\n> ${config.BOT_NAME}`);
   }
 
-  // ── Owner check for sensitive tools ───────────────────────────────────────
-  const isOwner = m.sender?.includes(config.OWNER_NUMBER || '254743982206');
+  // ── Owner check — use isOwner passed by handler (already resolves @lid JIDs) ──
   const sensitiveKeywords = ['github', 'berahost', 'deploy', 'create repo', 'push', 'start', 'stop', 'restart', 'mode', 'prefix'];
   const isSensitive = sensitiveKeywords.some(kw => q.toLowerCase().includes(kw));
   if (isSensitive && !isOwner) {
