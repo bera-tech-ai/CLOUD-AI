@@ -251,18 +251,27 @@ RULES:
 7. If a tool fails, tell the user and try an alternative or ask for clarification.`;
 }
 
-// ─── Call AI (Pollinations GPT-4o) ───────────────────────────────────────────
+// ─── Call AI (GitHub Models — gpt-4o-mini, free with GITHUB_TOKEN) ──────────
 async function callAI(messages) {
+  const token = process.env.GITHUB_TOKEN || config.GITHUB_TOKEN;
+  if (!token) throw new Error('GITHUB_TOKEN not set');
+
   const res = await axios.post(
-    'https://text.pollinations.ai/openai',
+    'https://models.inference.ai.azure.com/chat/completions',
     {
-      model: 'openai-large',
+      model: 'gpt-4o-mini',
       messages,
-      max_tokens: 600,
+      max_tokens: 800,
       temperature: 0.4,
       response_format: { type: 'json_object' },
     },
-    { timeout: 60000, headers: { 'Content-Type': 'application/json' } }
+    {
+      timeout: 60000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    }
   );
   const raw = res.data?.choices?.[0]?.message?.content?.trim();
   if (!raw) throw new Error('Empty AI response');
