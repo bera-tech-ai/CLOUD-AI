@@ -337,6 +337,9 @@ async function connectToWhatsApp() {
 
   // ─── Messages ───
   conn.ev.on('messages.upsert', async ({ messages, type }) => {
+    // Diagnostic: log every upsert event so we can see if messages arrive at all
+    _origLog(`[UPSERT] type=${type} count=${messages.length} keys=${messages.map(m=>m.key?.remoteJid).join(',')}`);
+
     // 'notify' = normal incoming messages
     // 'append' = messages from YOUR OWN other devices (needed to catch button tap responses
     //            in multi-device: when you tap a button on your phone, the bot sees type='append')
@@ -347,7 +350,8 @@ async function connectToWhatsApp() {
       msg.message?.listResponseMessage ||
       msg.message?.templateButtonReplyMessage
     );
-    if (type !== 'notify' && !messages.some(isInteractiveResponse)) return;
+    // Accept BOTH 'notify' and 'append' so no commands are dropped
+    if (type !== 'notify' && type !== 'append' && !messages.some(isInteractiveResponse)) return;
 
     for (let msg of messages) {
       try {
