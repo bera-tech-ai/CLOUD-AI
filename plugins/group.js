@@ -1,6 +1,6 @@
 import config from '../config.cjs';
 
-const group = async (m, conn) => {
+const group = async (m, conn, { isOwner } = {}) => {
   if (!m.body) return;
   const body = m.body.trim();
   if (!body.startsWith(config.PREFIX)) return;
@@ -23,7 +23,7 @@ const group = async (m, conn) => {
     groupAdmins = participants.filter(p => p.admin).map(p => p.id);
     isBotAdmin = groupAdmins.includes(conn.user?.id?.split(':')[0] + '@s.whatsapp.net') ||
                  groupAdmins.includes(conn.user?.id);
-    isAdmin = groupAdmins.includes(m.sender) || m.sender === config.OWNER_NUMBER + '@s.whatsapp.net';
+    isAdmin = groupAdmins.includes(m.sender) || isOwner;
   } catch {}
 
   const botId = conn.user?.id?.split(':')[0] + '@s.whatsapp.net';
@@ -307,7 +307,7 @@ const group = async (m, conn) => {
 
   // ─── LEAVE GROUP (owner only) ───
   if (['gcleave', 'leavegroup', 'leave'].includes(cmd)) {
-    if (m.sender !== config.OWNER_NUMBER + '@s.whatsapp.net') return m.reply('❌ Owner only command!');
+    if (!isOwner) return m.reply('❌ Owner only command!');
     await m.reply(`👋 Leaving this group...\n\n> ${config.BOT_NAME}`);
     await conn.groupLeave(m.from);
     return;
