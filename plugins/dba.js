@@ -304,14 +304,10 @@ function addHistory(sender, role, content) {
 }
 function clearHistory(sender) { memory.delete(sender); }
 
-// ─── Send a progress message ─────────────────────────────────────────────────
-async function sendProgress(conn, from, text) {
-  try {
-    return await Promise.race([
-      conn.sendMessage(from, { text: `🤖 ${text}` }),
-      new Promise((_, r) => setTimeout(() => r(new Error('timeout')), 8000)),
-    ]);
-  } catch { return null; }
+// ─── Send a progress message (fire-and-forget — never blocks the bot) ──────────
+function sendProgress(conn, from, text) {
+  conn.sendMessage(from, { text: `🤖 ${text}` }).catch(() => {});
+  return null;
 }
 
 // ─── Agentic loop ────────────────────────────────────────────────────────────
