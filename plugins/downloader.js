@@ -24,9 +24,20 @@ async function resolveYoutubeUrl(q) {
   return results[0];
 }
 
+// ─── Fetch file size from URL (HEAD request) → "X.XX MB" ─────────────────────
+async function getFileSizeMB(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+    const bytes = parseInt(res.headers.get('content-length') || '0', 10);
+    if (bytes > 0) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  } catch {}
+  return null;
+}
+
 // ─── Send audio from a direct URL (no disk write needed) ─────────────────────
 async function sendAudioFromUrl(conn, m, dl, meta) {
   const quoted = { quoted: { key: m.key, message: m.message } };
+  const sizeMB = await getFileSizeMB(dl.download_url);
   if (meta.thumbnail) {
     await conn.sendMessage(m.from, {
       image: { url: meta.thumbnail },
@@ -37,6 +48,7 @@ async function sendAudioFromUrl(conn, m, dl, meta) {
         `⏱️ *Duration:* ${meta.duration || '?:??'}`,
         meta.views ? `👁️ *Views:* ${fmtViews(meta.views)}` : null,
         `🔊 *Quality:* ${dl.quality || '128kbps'}`,
+        sizeMB ? `📦 *Size:* ${sizeMB}` : null,
         ``,
         `> ${config.BOT_NAME}`,
       ].filter(l => l !== null).join('\n'),
@@ -53,6 +65,7 @@ async function sendAudioFromUrl(conn, m, dl, meta) {
 // ─── Send video from a direct URL ────────────────────────────────────────────
 async function sendVideoFromUrl(conn, m, dl, meta) {
   const quoted = { quoted: { key: m.key, message: m.message } };
+  const sizeMB = await getFileSizeMB(dl.download_url);
   const caption = [
     `🎬 *${dl.title || meta.title || 'Unknown'}*`,
     `━━━━━━━━━━━━━━━━━━━━━`,
@@ -60,6 +73,7 @@ async function sendVideoFromUrl(conn, m, dl, meta) {
     `⏱️ *Duration:* ${meta.duration || '?:??'}`,
     meta.views ? `👁️ *Views:* ${fmtViews(meta.views)}` : null,
     `🎞️ *Quality:* ${dl.quality || '480p'}`,
+    sizeMB ? `📦 *Size:* ${sizeMB}` : null,
     ``,
     `> ${config.BOT_NAME}`,
   ].filter(l => l !== null).join('\n');
