@@ -89,18 +89,7 @@ async function callPollinationsAI(prompt, pollinationsModel = 'openai') {
     } catch (_) {}
   }
 
-  // 3️⃣ Pollinations GET (last resort, no key)
-  try {
-    const encoded = encodeURIComponent(prompt);
-    const res = await axios.get(
-      `https://text.pollinations.ai/${encoded}?model=${pollinationsModel}&seed=-1`,
-      { timeout: 20000, responseType: 'text' }
-    );
-    const text = typeof res.data === 'string' ? res.data.trim() : JSON.stringify(res.data);
-    return text || null;
-  } catch (e) {
-    throw new Error(e?.response?.data || e.message || 'AI request failed');
-  }
+  throw new Error('AI unavailable — check GITHUB_TOKEN or OPENAI_API_KEY');
 }
 
 // ─── Translate using GiftedTech or fallback ──────────────────────────────────
