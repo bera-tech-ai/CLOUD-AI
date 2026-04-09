@@ -283,7 +283,7 @@ async function callAI(messages) {
       const res = await axios.post(
         'https://api.deepseek.com/v1/chat/completions',
         body('deepseek-chat'),
-        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsToken}` } }
+        { timeout: 20000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsToken}` } }
       );
       const raw = res.data?.choices?.[0]?.message?.content?.trim();
       if (raw) return JSON.parse(raw);
