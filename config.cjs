@@ -42,6 +42,10 @@ const config = {
   REJECT_CALL:         process.env.REJECT_CALL   !== undefined ? process.env.REJECT_CALL   === "true" : false,
   NOT_ALLOW:           process.env.NOT_ALLOW      !== undefined ? process.env.NOT_ALLOW      === "true" : true,
 
+  // ── GitHub integration (set GITHUB_TOKEN env var on BeraHost) ──
+  GITHUB_TOKEN:        process.env.GITHUB_TOKEN || "",
+  GITHUB_REPO:         process.env.GITHUB_REPO  || "bera-tech-ai/CLOUD-AI",
+
   // ── Legacy API (deprecated — Pollinations.ai used instead) ──
   GIFTED_API_KEY:      process.env.GIFTED_API_KEY || "gifted",
   GIFTED_API:          process.env.GIFTED_API || "https://api.giftedtech.co.ke/api",
