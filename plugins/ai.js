@@ -43,37 +43,49 @@ const AI_LABEL = {
   letmegpt: '🔍 LetMeGPT',
 };
 
-// ─── Call Pollinations.ai text API (free, no key) ────────────────────────────
-async function callPollinationsAI(prompt, model = 'openai') {
-  try {
-    // POST method (more reliable for long prompts)
-    const res = await axios.post(
-      'https://text.pollinations.ai/openai',
-      {
-        model,
-        messages: [
-          {
-            role: 'system',
-            content: `You are ${config.BOT_NAME}, a helpful and intelligent WhatsApp AI assistant created by ${config.OWNER_NAME}. Be concise, friendly and helpful. Keep responses under 1500 characters when possible.`,
-          },
-          { role: 'user', content: prompt },
-        ],
-        max_tokens: 1000,
-        temperature: 0.7,
-      },
-      {
-        timeout: 60000,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-    return res.data?.choices?.[0]?.message?.content?.trim() || null;
-  } catch (_) {}
+// ─── GitHub Models → model name mapping ─────────────────────────────────────
+const GH_MODEL_MAP = {
+  'openai': 'gpt-4o-mini',
+  'openai-large': 'gpt-4o',
+  'claude-hybridspace': 'gpt-4o',   // fallback — GitHub doesn't have Claude
+  'llama': 'Meta-Llama-3.1-70B-Instruct',
+  'mistral': 'Mistral-large-2407',
+  'phi': 'Phi-3.5-MoE-instruct',
+};
 
-  // GET fallback
+// ─── Call AI via GitHub Models (free with GITHUB_TOKEN) ──────────────────────
+async function callPollinationsAI(prompt, pollinationsModel = 'openai') {
+  const ghModel = GH_MODEL_MAP[pollinationsModel] || 'gpt-4o-mini';
+  const token   = process.env.GITHUB_TOKEN;
+
+  // Primary: GitHub Models (fast, reliable, free)
+  if (token) {
+    try {
+      const res = await axios.post(
+        'https://models.inference.ai.azure.com/chat/completions',
+        {
+          model: ghModel,
+          messages: [
+            {
+              role: 'system',
+              content: `You are ${config.BOT_NAME}, a helpful and intelligent WhatsApp AI assistant created by ${config.OWNER_NAME}. Be concise, friendly and helpful. Keep responses under 1500 characters when possible.`,
+            },
+            { role: 'user', content: prompt },
+          ],
+          max_tokens: 1000,
+          temperature: 0.7,
+        },
+        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } }
+      );
+      return res.data?.choices?.[0]?.message?.content?.trim() || null;
+    } catch (_) {}
+  }
+
+  // Fallback: Pollinations GET (no key required)
   try {
     const encoded = encodeURIComponent(prompt);
     const res = await axios.get(
-      `https://text.pollinations.ai/${encoded}?model=${model}&seed=-1`,
+      `https://text.pollinations.ai/${encoded}?model=${pollinationsModel}&seed=-1`,
       { timeout: 45000, responseType: 'text' }
     );
     const text = typeof res.data === 'string' ? res.data.trim() : JSON.stringify(res.data);
