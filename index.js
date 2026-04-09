@@ -335,6 +335,17 @@ async function connectToWhatsApp() {
     setInterval(() => conn.sendPresenceUpdate('available').catch(() => {}), 30000);
   }
 
+  // ─── Heartbeat — prevents BeraHost 20-min idle kill ───
+  // BeraHost kills any bot with no stdout for 20 minutes (even if perfectly connected).
+  // Log a small heartbeat every 10 minutes so the process always has recent output.
+  setInterval(() => {
+    const uptime = Math.floor(process.uptime());
+    const h = Math.floor(uptime / 3600);
+    const m = Math.floor((uptime % 3600) / 60);
+    const s = uptime % 60;
+    _origLog(lime(`💓 Heartbeat — uptime ${h}h ${m}m ${s}s | msgs in store: ${messageStore.size}`));
+  }, 10 * 60 * 1000); // every 10 minutes
+
   // ─── Messages ───
   conn.ev.on('messages.upsert', async ({ messages, type }) => {
     // 'notify' = normal incoming messages
