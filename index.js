@@ -66,6 +66,7 @@ let initialConnection = true;
 let reconnectAttempts = 0;
 const msgRetryCounterCache = new NodeCache();
 const messageStore = new Map();
+const groupMetadataCache = {};
 
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const sessionDir = path.join(__dirname, 'session');
@@ -209,6 +210,8 @@ async function connectToWhatsApp() {
     downloadMediaMessage,
     keepAliveIntervalMs: 30000,   // standard 30s keep-alive — avoids WA bot-detection
     connectTimeoutMs: 60000,      // give extra time for initial burst
+    // Provide cached group metadata so Baileys can encrypt group messages without fetching fresh
+    cachedGroupMetadata: async (jid) => groupMetadataCache[jid],
     // Return stored message or undefined — prevents retry receipts flooding WA for old encrypted msgs
     getMessage: async (key) => {
       const stored = messageStore.get(`${key.remoteJid}:${key.id}`);
@@ -289,13 +292,30 @@ async function connectToWhatsApp() {
           const results = await conn.onWhatsApp(config.OWNER_NUMBER);
           const ownerInfo = Array.isArray(results) ? results[0] : results;
           if (ownerInfo?.jid && ownerInfo.jid !== ownerPhone) {
-            lidMap.set(ownerInfo.jid, ownerPhone);   // @lid → phone JID
-            lidMap.set(ownerPhone, ownerInfo.jid);   // phone JID → @lid (reverse)
+            lidMap.set(ownerInfo.jid, ownerPhone);
+            lidMap.set(ownerPhone, ownerInfo.jid);
             _origLog(lime(`🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`));
           }
         } catch (_) {}
+
+        // Pre-load group metadata so Baileys can encrypt group messages immediately
+        setTimeout(async () => {
+          try {
+            const groups = await conn.groupFetchAllParticipating();
+            Object.assign(groupMetadataCache, groups);
+            _origLog(lime(`📋 Group cache loaded: ${Object.keys(groups).length} groups`));
+          } catch (_) {}
+        }, 5000);
       }
     }
+  });
+
+  // ─── Keep group metadata cache fresh ───
+  conn.ev.on('group-participants.update', async ({ id }) => {
+    try {
+      const meta = await conn.groupMetadata(id);
+      groupMetadataCache[id] = meta;
+    } catch (_) {}
   });
 
   conn.ev.on('creds.update', saveCreds);
