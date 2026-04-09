@@ -298,14 +298,7 @@ async function connectToWhatsApp() {
           }
         } catch (_) {}
 
-        // Pre-load group metadata so Baileys can encrypt group messages immediately
-        setTimeout(async () => {
-          try {
-            const groups = await conn.groupFetchAllParticipating();
-            Object.assign(groupMetadataCache, groups);
-            _origLog(lime(`📋 Group cache loaded: ${Object.keys(groups).length} groups`));
-          } catch (_) {}
-        }, 5000);
+        // Group metadata is cached lazily on first message from each group
       }
     }
   });
