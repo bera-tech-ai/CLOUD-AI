@@ -27,13 +27,29 @@ export async function Handler(conn, m, plugins) {
     }
     const resolvedSender = (msg.sender?.endsWith('@lid') && lidMap.get(msg.sender)) || msg.sender;
 
+    // All known forms of the owner's JID — including any @lid entries that
+    // have been resolved to their phone number via the lid map
+    const ownerPhone = config.OWNER_NUMBER + '@s.whatsapp.net';
+    const ownerLids  = [...lidMap.entries()]
+      .filter(([, v]) => v === ownerPhone)
+      .map(([k]) => k);
+
     const ownerJids = [
-      config.OWNER_NUMBER + '@s.whatsapp.net',
+      ownerPhone,
       conn.user?.id,
       conn.user?.id?.split(':')[0] + '@s.whatsapp.net',
+      ...ownerLids,   // every @lid that resolves to owner's phone number
     ].filter(Boolean);
 
-    const isOwner = ownerJids.includes(msg.sender) || ownerJids.includes(resolvedSender);
+    // Phone-number fallback: if we resolved the @lid to a @s.whatsapp.net JID,
+    // compare the raw phone number part so a device-suffix like :22 doesn't block it
+    const resolvedPhone = resolvedSender?.endsWith('@s.whatsapp.net')
+      ? resolvedSender.split('@')[0].split(':')[0]
+      : null;
+
+    const isOwner = ownerJids.includes(msg.sender)
+      || ownerJids.includes(resolvedSender)
+      || (resolvedPhone && resolvedPhone === config.OWNER_NUMBER);
 
     // Auto typing
     if (config.AUTO_TYPING) {
