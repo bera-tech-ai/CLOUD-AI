@@ -69,7 +69,7 @@ async function callPollinationsAI(prompt, pollinationsModel = 'openai') {
       const res = await axios.post(
         'https://models.inference.ai.azure.com/chat/completions',
         { model: ghModel, messages: [sysmsg, { role: 'user', content: prompt }], max_tokens: 1000, temperature: 0.7 },
-        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
+        { timeout: 20000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
       );
       const txt = res.data?.choices?.[0]?.message?.content?.trim();
       if (txt) return txt;
@@ -82,7 +82,7 @@ async function callPollinationsAI(prompt, pollinationsModel = 'openai') {
       const res = await axios.post(
         'https://api.deepseek.com/v1/chat/completions',
         { model: 'deepseek-chat', messages: [sysmsg, { role: 'user', content: prompt }], max_tokens: 1000, temperature: 0.7 },
-        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsToken}` } }
+        { timeout: 20000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsToken}` } }
       );
       const txt = res.data?.choices?.[0]?.message?.content?.trim();
       if (txt) return txt;
@@ -94,7 +94,7 @@ async function callPollinationsAI(prompt, pollinationsModel = 'openai') {
     const encoded = encodeURIComponent(prompt);
     const res = await axios.get(
       `https://text.pollinations.ai/${encoded}?model=${pollinationsModel}&seed=-1`,
-      { timeout: 45000, responseType: 'text' }
+      { timeout: 20000, responseType: 'text' }
     );
     const text = typeof res.data === 'string' ? res.data.trim() : JSON.stringify(res.data);
     return text || null;
