@@ -107,12 +107,22 @@ console.info  = suppress(_origInfo);   // libsignal uses console.info for "Closi
 // ─── Simple contacts store (makeInMemoryStore removed in baileys@6.7.21) ───
 const store = { contacts: {} };
 
+// ─── Session corruption flag — set when crypto state becomes invalid ─────────
+let sessionCorrupted = false;
+
 // ─── Global crash guard — prevents any internal Baileys error from killing the process ───
 process.on('uncaughtException', (err) => {
   _origLog(chalk.red(`⚠️ Uncaught Exception (handled): ${err.message}`));
+  if (/unsupported state|unable to authenticate/i.test(err.message || '')) {
+    sessionCorrupted = true;
+  }
 });
 process.on('unhandledRejection', (reason) => {
-  _origLog(chalk.red(`⚠️ Unhandled Rejection (handled): ${reason?.message || reason}`));
+  const msg = reason?.message || String(reason);
+  _origLog(chalk.red(`⚠️ Unhandled Rejection (handled): ${msg}`));
+  if (/unsupported state|unable to authenticate/i.test(msg)) {
+    sessionCorrupted = true;
+  }
 });
 
 // ─── Banner ───
@@ -160,6 +170,15 @@ async function loadSession() {
 
 // ─── Connect ───
 async function connectToWhatsApp() {
+  // If local session crypto state was corrupted, wipe it and reload from Atassa
+  if (sessionCorrupted) {
+    _origLog(chalk.yellow('🔁 Session state corrupted — clearing and reloading from Atassa...'));
+    sessionCorrupted = false;
+    initialConnection = true;
+    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
+    try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+  }
+
   if (!fs.existsSync(credsPath)) {
     const sid = config.SESSION_ID;
     if (sid && sid !== 'Your_Session_Id') {
