@@ -1,6 +1,7 @@
 import config from '../config.cjs';
 import axios from 'axios';
 import { sendBtn } from '../lib/sendBtn.js';
+import { translateText as beraTranslate } from '../lib/beraapi.js';
 
 const p = config.PREFIX;
 
@@ -122,23 +123,31 @@ const aiPlugin = async (m, conn) => {
     return;
   }
 
-  // ─── TRANSLATE ────────────────────────────────────────────────────────────
+  // ─── TRANSLATE (Bera API → Pollinations fallback) ─────────────────────────
   if (['translate', 'tr', 'tl'].includes(cmd)) {
-    if (!q) return m.reply(`❌ Usage: ${p}translate <language> <text>\n\nExample: ${p}translate swahili Hello World\n\n> ${config.BOT_NAME}`);
+    if (!q) return m.reply(`❌ Usage: ${p}translate <language> <text>\n\nExample: ${p}translate sw Hello World\n\n> ${config.BOT_NAME}`);
     const parts = q.split(' ');
     const lang = parts[0];
     const text = parts.slice(1).join(' ');
-    if (!text) return m.reply(`❌ Provide text to translate!\n\nUsage: ${p}translate <language> <text>`);
+    if (!text) return m.reply(`❌ Provide text to translate!\n\nUsage: ${p}translate <lang-code> <text>\n\nExamples:\n• ${p}translate sw Good morning\n• ${p}translate fr How are you?\n• ${p}translate es Hello friend\n\n> ${config.BOT_NAME}`);
 
     await m.React('🌐');
     try {
-      const result = await translateText(text, lang);
-      if (!result) throw new Error('No translation returned');
-      await m.reply(`🌐 *Translation*\n\n📝 *Original:* ${text}\n🗣️ *Language:* ${lang}\n\n✅ *Result:*\n${result}\n\n> ${config.BOT_NAME}`);
+      let translated, fromLang;
+      try {
+        const r = await beraTranslate(text, lang);
+        translated = r.translated;
+        fromLang = r.from;
+      } catch {
+        translated = await translateText(text, lang);
+        fromLang = 'auto';
+      }
+      if (!translated) throw new Error('No translation returned');
+      await m.reply(`🌐 *Translation*\n${'━'.repeat(22)}\n\n📝 *Original (${fromLang}):*\n${text}\n\n✅ *Translated (${lang}):*\n${translated}\n\n> ${config.BOT_NAME}`);
       await m.React('✅');
     } catch (err) {
       await m.React('❌');
-      await m.reply(`❌ Translation failed: ${err.message}`);
+      await m.reply(`❌ Translation failed: ${err.message}\n\n> ${config.BOT_NAME}`);
     }
     return;
   }
