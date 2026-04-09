@@ -47,6 +47,7 @@ import beraPlugin from './plugins/bera.js';
 import { onGroupUpdate } from './plugins/welcome.js';
 import { handleCall } from './plugins/anticall.js';
 import btnmenuPlugin from './plugins/btnmenu.js';
+import dbaPlugin from './plugins/dba.js';
 
 const ALL_PLUGINS = [
   beraPlugin,   // MUST be first — rewrites m.body before other plugins run
@@ -54,7 +55,7 @@ const ALL_PLUGINS = [
   generalPlugin, aiPlugin, imaginePlugin, animePlugin, photoPlugin,
   downloaderPlugin, converterPlugin, toolsPlugin, extraPlugin,
   groupPlugin, ownerPlugin, searchPlugin, gamesPlugin, settingsPlugin,
-  techPlugin, funPlugin, infoPlugin,
+  techPlugin, funPlugin, infoPlugin, dbaPlugin,
 ];
 
 // ─── Setup ───
