@@ -117,6 +117,8 @@ const aiPlugin = async (m, conn) => {
     }
 
     await m.React('🤖');
+    // Instant feedback — user sees this while AI is thinking
+    await conn.sendMessage(m.from, { text: `🤖 *Thinking...* 🧠` }).catch(() => {});
     try {
       const model = MODEL_MAP[cmd];
       const result = await callPollinationsAI(q, model);
