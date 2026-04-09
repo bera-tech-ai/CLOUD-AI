@@ -187,6 +187,12 @@ async function connectToWhatsApp() {
     generateHighQualityLinkPreview: true,
     syncFullHistory: false,
     downloadMediaMessage,
+    // Return stored message or undefined — prevents retry receipts flooding WA for old encrypted msgs
+    getMessage: async (key) => {
+      const stored = messageStore.get(`${key.remoteJid}:${key.id}`);
+      return stored || undefined;
+    },
+    retryRequestDelayMs: 2000,
   });
 
   // ─── Populate simple store contacts from events ───
@@ -222,14 +228,15 @@ async function connectToWhatsApp() {
         const wait440 = reconnectAttempts <= 3 ? 60000 : Math.min(60000 * reconnectAttempts, 300000);
         _origLog(chalk.yellow(`⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440/1000)}s for WA to settle...`));
         setTimeout(() => connectToWhatsApp(), wait440);
-      } else if (code === 408 || code === 503) {
+      } else if (code === 408 || code === 428 || code === 503) {
+        // 408/428 = connection closed/timeout — back off so WA clears message queue
         reconnectAttempts++;
-        const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 60000);
+        const delay = Math.min(15000 * Math.pow(1.5, reconnectAttempts - 1), 120000);
         _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
         setTimeout(() => connectToWhatsApp(), delay);
       } else {
         reconnectAttempts++;
-        const delay = Math.min(4000 * reconnectAttempts, 30000);
+        const delay = Math.min(8000 * reconnectAttempts, 60000);
         _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay/1000)}s...`));
         setTimeout(() => connectToWhatsApp(), delay);
       }
@@ -368,10 +375,14 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        // Store for anti-delete
-        if (config.ANTI_DELETE && !msg.key.fromMe && msg.message) {
-          messageStore.set(msg.key.id, { msg, ts: Date.now() });
-          if (messageStore.size > 300) {
+        // Store for getMessage (decrypt retry) and anti-delete
+        if (msg.message) {
+          const storeKey = `${msg.key.remoteJid}:${msg.key.id}`;
+          messageStore.set(storeKey, msg.message);       // for getMessage callback
+          if (!msg.key.fromMe) {
+            messageStore.set(msg.key.id, { msg, ts: Date.now() }); // for anti-delete
+          }
+          if (messageStore.size > 600) {
             const oldest = messageStore.keys().next().value;
             messageStore.delete(oldest);
           }
