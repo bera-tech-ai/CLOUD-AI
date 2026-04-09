@@ -82,6 +82,8 @@ const SUPPRESS = [
   /verifyMAC/i, /chainKey/i, /chainType/i, /messageKeys/i, /baseKeyType/i,
   /remoteIdentityKey/i, /signedKeyId/i, /preKeyId/i, /privKey/i, /pubKey/i,
   /<Buffer /i, /previousCounter/i,
+  /Failed to decrypt/i, /decrypt message with/i, /no matching sessions/i,
+  /Error decrypting/i, /SenderKeyMessage/i, /failed to decrypt group/i,
 ];
 function suppress(fn) {
   return (...args) => {
@@ -206,12 +208,14 @@ async function connectToWhatsApp() {
     generateHighQualityLinkPreview: true,
     syncFullHistory: false,
     downloadMediaMessage,
+    keepAliveIntervalMs: 10000,   // aggressive keep-alive survives decrypt flood
+    connectTimeoutMs: 60000,      // give extra time for initial burst
     // Return stored message or undefined — prevents retry receipts flooding WA for old encrypted msgs
     getMessage: async (key) => {
       const stored = messageStore.get(`${key.remoteJid}:${key.id}`);
       return stored || undefined;
     },
-    retryRequestDelayMs: 2000,
+    retryRequestDelayMs: 5000,    // slower retries = less WA pressure
   });
 
   // ─── Populate simple store contacts from events ───
