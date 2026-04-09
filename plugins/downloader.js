@@ -1,7 +1,7 @@
 import config from '../config.cjs';
 import fs from 'fs';
 import { downloadAudio, downloadVideo, ytSearch as ytdlpSearch, getInfo } from '../lib/ytdlp.js';
-import { ytmp3 as beraYtmp3, ytmp4 as beraYtmp4, tiktokDl, ytSearch as beraYtSearch } from '../lib/beraapi.js';
+import { tiktokDl, ytSearch as beraYtSearch } from '../lib/beraapi.js';
 
 const p = config.PREFIX;
 
@@ -57,53 +57,6 @@ async function smartYtSearch(query, limit = 1) {
   return ytdlpSearch(query, limit);
 }
 
-// ─── Bera API audio download and send (URL stream → no disk needed) ──────────
-async function beraAudioDownload(conn, m, top) {
-  const q = { quoted: { key: m.key, message: m.message } };
-  const stop = startKeepalive(conn, m.from);
-  try {
-    const dl = await beraYtmp3(top.url || top, '128kbps');
-    stop();
-    if (dl.thumbnail) {
-      await conn.sendMessage(m.from, {
-        image: { url: dl.thumbnail },
-        caption: buildCard({ title: dl.title, uploader: 'YouTube', duration: top.duration || '?:??', views: top.views }, 'YouTube'),
-      }, q);
-    }
-    await conn.sendMessage(m.from, {
-      audio: { url: dl.download_url },
-      mimetype: 'audio/mpeg',
-      fileName: `${(dl.title || 'audio').replace(/[^\w\s-]/g, '').trim()}.mp3`,
-      ptt: false,
-    }, q);
-    await m.React('✅');
-    return true;
-  } catch (err) {
-    stop();
-    throw err;
-  }
-}
-
-// ─── Bera API video download and send ────────────────────────────────────────
-async function beraVideoDownload(conn, m, top) {
-  const q = { quoted: { key: m.key, message: m.message } };
-  const stop = startKeepalive(conn, m.from);
-  try {
-    const dl = await beraYtmp4(top.url || top, '480p');
-    stop();
-    await conn.sendMessage(m.from, {
-      video: { url: dl.download_url },
-      mimetype: 'video/mp4',
-      fileName: `${(dl.title || 'video').replace(/[^\w\s-]/g, '').trim()}.mp4`,
-      caption: buildCard({ title: dl.title, uploader: 'YouTube', duration: top.duration || '?:??' }, 'YouTube'),
-    }, q);
-    await m.React('✅');
-    return true;
-  } catch (err) {
-    stop();
-    throw err;
-  }
-}
 
 // ─── Download audio and send ─────────────────────────────────────────────────
 async function doAudioDownload(conn, m, top) {
@@ -209,12 +162,7 @@ Examples:
         caption: card,
       }, quoted).catch(() => conn.sendMessage(m.from, { text: card }, quoted));
 
-      // Try Bera API first (fast, no bot check), fallback to yt-dlp
-      try {
-        await beraAudioDownload(conn, m, top);
-      } catch {
-        await doAudioDownload(conn, m, top);
-      }
+      await doAudioDownload(conn, m, top);
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching?.key }).catch(() => null);
       await m.React('❌');
@@ -235,11 +183,7 @@ Examples:
       if (!results.length) throw new Error('No results found for that query');
       const top = results[0];
       await conn.sendMessage(m.from, { delete: searching.key }).catch(() => null);
-      try {
-        await beraVideoDownload(conn, m, top);
-      } catch {
-        await doVideoDownload(conn, m, top);
-      }
+      await doVideoDownload(conn, m, top);
     } catch (err) {
       await conn.sendMessage(m.from, { delete: searching?.key }).catch(() => null);
       await m.React('❌');
@@ -324,14 +268,7 @@ ${list}
       if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found.\n\n> ${config.BOT_NAME}`); }
       top = results[0];
     }
-    const status2 = await conn.sendMessage(m.from, { text: `⬇️ *Downloading MP3...*\n\n🎵 *${top.title}*` }, quoted);
-    try {
-      await beraAudioDownload(conn, m, top);
-      await conn.sendMessage(m.from, { delete: status2.key }).catch(() => null);
-    } catch {
-      await conn.sendMessage(m.from, { delete: status2.key }).catch(() => null);
-      await doAudioDownload(conn, m, top);
-    }
+    await doAudioDownload(conn, m, top);
     return;
   }
 
@@ -345,14 +282,7 @@ ${list}
       if (!results.length) { await m.React('❌'); return m.reply(`❌ No results found.\n\n> ${config.BOT_NAME}`); }
       top = results[0];
     }
-    const status3 = await conn.sendMessage(m.from, { text: `⬇️ *Downloading Video...*\n\n🎵 *${top.title}*` }, quoted);
-    try {
-      await beraVideoDownload(conn, m, top);
-      await conn.sendMessage(m.from, { delete: status3.key }).catch(() => null);
-    } catch {
-      await conn.sendMessage(m.from, { delete: status3.key }).catch(() => null);
-      await doVideoDownload(conn, m, top);
-    }
+    await doVideoDownload(conn, m, top);
     return;
   }
 
