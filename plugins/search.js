@@ -1,5 +1,6 @@
 import config from '../config.cjs';
 import axios from 'axios';
+import { wikiSearch, lyricsSearch } from '../lib/beraapi.js';
 
 const API = config.GIFTED_API || 'https://api.giftedtech.co.ke/api';
 const KEY = config.GIFTED_API_KEY || 'gifted';
@@ -65,22 +66,54 @@ const search = async (m, conn) => {
     return;
   }
 
-  // ─── WIKIPEDIA ───
+  // ─── WIKIPEDIA (Bera API) ───
   if (['wikipedia', 'wiki', 'wp'].includes(cmd)) {
-    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}wikipedia <topic>`);
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}wiki <topic>\n\nExample: ${config.PREFIX}wiki Elon Musk\n\n> ${config.BOT_NAME}`);
     await m.React('📚');
     try {
-      const data = await gApi('search/wikipedia', { q });
-      const r = data?.result || data;
-      const text = r?.description || r?.extract || r?.summary;
+      const r = await wikiSearch(q);
+      const text = r?.extract || r?.description || r?.summary;
       if (!text) throw new Error('No Wikipedia entry found');
-      const title = r?.title || q;
-      const msg = `📚 *Wikipedia: ${title}*\n\n${text.slice(0, 2000)}${text.length > 2000 ? '...\n\n_(Read more on Wikipedia)_' : ''}\n\n> ${config.BOT_NAME}`;
-      await m.reply(msg);
+      const msg = `📚 *Wikipedia: ${r.title || q}*\n${'━'.repeat(22)}\n\n${text.slice(0, 3000)}${text.length > 3000 ? '\n\n_...Read more on Wikipedia_' : ''}\n\n> ${config.BOT_NAME}`;
+      if (r.thumbnail) {
+        await conn.sendMessage(m.from, {
+          image: { url: r.thumbnail },
+          caption: msg,
+        }, { quoted: { key: m.key, message: m.message } }).catch(() => m.reply(msg));
+      } else {
+        await m.reply(msg);
+      }
       await m.React('✅');
     } catch (err) {
       await m.React('❌');
-      await m.reply(`❌ Wikipedia search failed: ${err?.response?.data?.message || err.message}`);
+      await m.reply(`❌ Wikipedia search failed: ${err.message}\n\n> ${config.BOT_NAME}`);
+    }
+    return;
+  }
+
+  // ─── LYRICS (Bera API) ───
+  if (['lyrics', 'lyric', 'lyr', 'ly'].includes(cmd)) {
+    if (!q) return m.reply(`❌ Usage: ${config.PREFIX}lyrics <song name>\n\nExample: ${config.PREFIX}lyrics Shape of You\n\n> ${config.BOT_NAME}`);
+    await m.React('🎤');
+    try {
+      const r = await lyricsSearch(q);
+      if (!r?.lyrics) throw new Error('Lyrics not found');
+      const header = `🎤 *${r.title || q}*\n👤 *Artist:* ${r.artist || 'Unknown'}\n${'━'.repeat(22)}\n\n`;
+      const footer = `\n\n${'━'.repeat(22)}\n🔗 ${r.link || ''}\n> ${config.BOT_NAME}`;
+      const lyricsText = r.lyrics.slice(0, 3500);
+      const full = header + lyricsText + footer;
+      if (r.image) {
+        await conn.sendMessage(m.from, {
+          image: { url: r.image },
+          caption: full,
+        }, { quoted: { key: m.key, message: m.message } }).catch(() => m.reply(full));
+      } else {
+        await m.reply(full);
+      }
+      await m.React('✅');
+    } catch (err) {
+      await m.React('❌');
+      await m.reply(`❌ Lyrics not found for *"${q}"*\n\n${err.message}\n\n> ${config.BOT_NAME}`);
     }
     return;
   }
