@@ -428,6 +428,9 @@ I'm your intelligent assistant. Just talk to me naturally and I'll get things do
 
   await m.React('🤖');
 
+  // Send immediate "Thinking..." so user knows the bot received the command
+  const thinkingMsg = await sendProgress(conn, m.from, `*Thinking...* 🧠\n_"${q.slice(0, 60)}${q.length > 60 ? '...' : ''}"_`);
+
   try {
     const finalMessage = await runAgent(q, m.sender, conn, m.from, quoted);
 
