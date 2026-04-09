@@ -56,32 +56,40 @@ const GH_MODEL_MAP = {
 // ─── Call AI via GitHub Models (free with GITHUB_TOKEN) ──────────────────────
 async function callPollinationsAI(prompt, pollinationsModel = 'openai') {
   const ghModel = GH_MODEL_MAP[pollinationsModel] || 'gpt-4o-mini';
-  const token   = process.env.GITHUB_TOKEN;
+  const ghToken = process.env.GITHUB_TOKEN;
+  const dsToken = process.env.OPENAI_API_KEY;
+  const sysmsg  = {
+    role: 'system',
+    content: `You are ${config.BOT_NAME}, a helpful and intelligent WhatsApp AI assistant created by ${config.OWNER_NAME}. Be concise, friendly and helpful. Keep responses under 1500 characters when possible.`,
+  };
 
-  // Primary: GitHub Models (fast, reliable, free)
-  if (token) {
+  // 1️⃣ GitHub Models (primary)
+  if (ghToken) {
     try {
       const res = await axios.post(
         'https://models.inference.ai.azure.com/chat/completions',
-        {
-          model: ghModel,
-          messages: [
-            {
-              role: 'system',
-              content: `You are ${config.BOT_NAME}, a helpful and intelligent WhatsApp AI assistant created by ${config.OWNER_NAME}. Be concise, friendly and helpful. Keep responses under 1500 characters when possible.`,
-            },
-            { role: 'user', content: prompt },
-          ],
-          max_tokens: 1000,
-          temperature: 0.7,
-        },
-        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } }
+        { model: ghModel, messages: [sysmsg, { role: 'user', content: prompt }], max_tokens: 1000, temperature: 0.7 },
+        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
       );
-      return res.data?.choices?.[0]?.message?.content?.trim() || null;
+      const txt = res.data?.choices?.[0]?.message?.content?.trim();
+      if (txt) return txt;
     } catch (_) {}
   }
 
-  // Fallback: Pollinations GET (no key required)
+  // 2️⃣ DeepSeek (secondary — OPENAI_API_KEY)
+  if (dsToken) {
+    try {
+      const res = await axios.post(
+        'https://api.deepseek.com/v1/chat/completions',
+        { model: 'deepseek-chat', messages: [sysmsg, { role: 'user', content: prompt }], max_tokens: 1000, temperature: 0.7 },
+        { timeout: 60000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsToken}` } }
+      );
+      const txt = res.data?.choices?.[0]?.message?.content?.trim();
+      if (txt) return txt;
+    } catch (_) {}
+  }
+
+  // 3️⃣ Pollinations GET (last resort, no key)
   try {
     const encoded = encodeURIComponent(prompt);
     const res = await axios.get(
