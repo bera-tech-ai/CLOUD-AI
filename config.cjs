@@ -8,7 +8,7 @@ let _state = {};
 try { _state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")); } catch {}
 
 const config = {
-  SESSION_ID:        process.env.SESSION_ID || "Gifted~HX33tQxAWWjh",
+  SESSION_ID:        process.env.SESSION_ID || "Gifted~NbgYmHGNl3",
   PREFIX:            _state.PREFIX || process.env.PREFIX || ".",
   BOT_NAME:          _state.BOT_NAME || process.env.BOT_NAME || "ℂ𝕃𝕆𝕌𝔻 𝔸𝕀",
   OWNER_NAME:        process.env.OWNER_NAME || "𝔹ℝ𝕌ℂ𝔼 𝔹𝔼ℝ𝔸",
