@@ -199,7 +199,7 @@ async function connectToWhatsApp() {
 
     const conn = makeWASocket({
       version,
-      logger: pino({ level: 'silent' }),
+      logger: pino({ level: 'warn' }),
       printQRInTerminal: false,
       browser: Browsers.ubuntu('Chrome'),
       auth: state,
@@ -266,6 +266,7 @@ async function connectToWhatsApp() {
           initialConnection = false;
           const botNum = conn.user?.id?.split(':')[0];
           _origLog(lime(`\n✅ ${config.BOT_NAME} Connected!`));
+          _origLog('[SELFTEST] Attempting self-message send...');
           _origLog(lime(`👑 Owner  : ${config.OWNER_NAME} (+${config.OWNER_NUMBER})`));
           _origLog(lime(`📱 Number : ${botNum}`));
           _origLog(lime(`📶 Mode   : ${config.MODE}`));
@@ -317,6 +318,7 @@ async function connectToWhatsApp() {
 });
 
     conn.ev.on('messages.upsert', async ({ messages, type }) => {
+      _origLog('[MSG_IN] messages.upsert fired — type:', type, 'count:', messages.length);
       const isInteractiveResponse = (msg) => !!(
         msg.message?.interactiveResponseMessage ||
         msg.message?.viewOnceMessage?.message?.interactiveResponseMessage ||
