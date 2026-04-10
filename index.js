@@ -319,8 +319,7 @@ async function connectToWhatsApp() {
     // ─── ALL events diagnostic ───
     conn.ev.process(async (events) => {
       const evKeys = Object.keys(events);
-      if (evKeys.length > 0) _origLog('[EV_PROCESS]', evKeys.join(','));
-    });
+});
 
     conn.ev.on('messages.upsert', async ({ messages, type }) => {
       const isInteractiveResponse = (msg) => !!(
