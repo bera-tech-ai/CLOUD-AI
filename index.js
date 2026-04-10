@@ -323,7 +323,6 @@ async function connectToWhatsApp() {
     });
 
     conn.ev.on('messages.upsert', async ({ messages, type }) => {
-      _origLog('[MSG_DEBUG] upsert fired type=' + type + ' count=' + messages.length + ' fromMe=' + messages[0]?.key?.fromMe);
       const isInteractiveResponse = (msg) => !!(
         msg.message?.interactiveResponseMessage ||
         msg.message?.viewOnceMessage?.message?.interactiveResponseMessage ||
