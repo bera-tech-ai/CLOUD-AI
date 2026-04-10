@@ -67,6 +67,7 @@ let initialConnection = true;
 let reconnectAttempts = 0;
 let isConnecting = false;   // guard: one connection attempt at a time
 let activeConn = null;      // always points to the current live socket
+let sessionCorrupted = false; // set when crypto state becomes invalid
 const msgRetryCounterCache = new NodeCache();
 const messageStore = new Map();
 
@@ -113,9 +114,16 @@ const store = { contacts: {} };
 // ─── Global crash guard ───
 process.on('uncaughtException', (err) => {
   _origLog(chalk.red(`⚠️ Uncaught Exception (handled): ${err.message}`));
+  if (/unsupported state|unable to authenticate/i.test(err.message || '')) {
+    sessionCorrupted = true;
+  }
 });
 process.on('unhandledRejection', (reason) => {
-  _origLog(chalk.red(`⚠️ Unhandled Rejection (handled): ${reason?.message || reason}`));
+  const msg = reason?.message || String(reason);
+  _origLog(chalk.red(`⚠️ Unhandled Rejection (handled): ${msg}`));
+  if (/unsupported state|unable to authenticate/i.test(msg)) {
+    sessionCorrupted = true;
+  }
 });
 
 // ─── Banner ───
@@ -168,6 +176,15 @@ async function connectToWhatsApp() {
   isConnecting = true;
 
   try {
+    // If crypto state was corrupted, wipe and reload session from Atassa
+    if (sessionCorrupted) {
+      _origLog(chalk.yellow('🔁 Session state corrupted — clearing and reloading from Atassa...'));
+      sessionCorrupted = false;
+      initialConnection = true;
+      try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
+      try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+    }
+
     if (!fs.existsSync(credsPath)) {
       const sid = config.SESSION_ID;
       if (sid && sid !== 'Your_Session_Id') {
