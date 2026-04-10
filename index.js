@@ -64,6 +64,8 @@ const lime = chalk.bold.hex('#32CD32');
 const orange = chalk.bold.hex('#FFA500');
 let initialConnection = true;
 let reconnectAttempts = 0;
+let isConnecting = false;          // guard: prevents overlapping reconnect attempts
+let activeConn = null;             // always points to the current live socket
 const msgRetryCounterCache = new NodeCache();
 const messageStore = new Map();
 
@@ -103,15 +105,15 @@ function suppress(fn) {
 console.log   = suppress(_origLog);
 console.error = suppress(_origErr);
 console.warn  = suppress(_origWarn);
-console.info  = suppress(_origInfo);   // libsignal uses console.info for "Closing session"
+console.info  = suppress(_origInfo);
 
-// ─── Simple contacts store (makeInMemoryStore removed in baileys@6.7.21) ───
+// ─── Simple contacts store ───
 const store = { contacts: {} };
 
-// ─── Session corruption flag — set when crypto state becomes invalid ─────────
+// ─── Session corruption flag ─────────────────────────────────────────────────
 let sessionCorrupted = false;
 
-// ─── Global crash guard — prevents any internal Baileys error from killing the process ───
+// ─── Global crash guard ───────────────────────────────────────────────────────
 process.on('uncaughtException', (err) => {
   _origLog(chalk.red(`⚠️ Uncaught Exception (handled): ${err.message}`));
   if (/unsupported state|unable to authenticate/i.test(err.message || '')) {
@@ -171,325 +173,282 @@ async function loadSession() {
 
 // ─── Connect ───
 async function connectToWhatsApp() {
-  // If local session crypto state was corrupted, wipe it and reload from Atassa
-  if (sessionCorrupted) {
-    _origLog(chalk.yellow('🔁 Session state corrupted — clearing and reloading from Atassa...'));
-    sessionCorrupted = false;
-    initialConnection = true;
-    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
-    try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
-  }
+  // Guard: only one connection attempt at a time
+  if (isConnecting) return;
+  isConnecting = true;
 
-  if (!fs.existsSync(credsPath)) {
-    const sid = config.SESSION_ID;
-    if (sid && sid !== 'Your_Session_Id') {
-      const ok = await loadSession();
-      if (!ok) {
-        _origLog(chalk.red('❌ Failed to load session. Check your SESSION_ID and restart.'));
+  try {
+    // If local session crypto state was corrupted, wipe it and reload from Atassa
+    if (sessionCorrupted) {
+      _origLog(chalk.yellow('🔁 Session state corrupted — clearing and reloading from Atassa...'));
+      sessionCorrupted = false;
+      initialConnection = true;
+      try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
+      try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+    }
+
+    if (!fs.existsSync(credsPath)) {
+      const sid = config.SESSION_ID;
+      if (sid && sid !== 'Your_Session_Id') {
+        const ok = await loadSession();
+        if (!ok) {
+          _origLog(chalk.red('❌ Failed to load session. Check your SESSION_ID and restart.'));
+          process.exit(1);
+        }
+      } else {
+        _origLog(chalk.red('❌ No SESSION_ID configured. Set SESSION_ID and restart.'));
         process.exit(1);
       }
-    } else {
-      _origLog(chalk.red('❌ No SESSION_ID configured. Set SESSION_ID and restart.'));
-      process.exit(1);
     }
-  }
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion();
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+    const { version } = await fetchLatestBaileysVersion();
 
-  const conn = makeWASocket({
-    version,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: false,
-    browser: Browsers.ubuntu('Chrome'),
-    auth: state,
-    msgRetryCounterCache,
-    generateHighQualityLinkPreview: true,
-    syncFullHistory: false,
-    downloadMediaMessage,
-    keepAliveIntervalMs: 30000,   // standard 30s keep-alive — avoids WA bot-detection
-    connectTimeoutMs: 60000,      // give extra time for initial burst
-    // Return stored message or undefined — prevents retry receipts flooding WA for old encrypted msgs
-    getMessage: async (key) => {
-      const stored = messageStore.get(`${key.remoteJid}:${key.id}`);
-      return stored || undefined;
-    },
-    retryRequestDelayMs: 5000,    // slower retries = less WA pressure
-  });
+    const conn = makeWASocket({
+      version,
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: false,
+      browser: Browsers.ubuntu('Chrome'),
+      auth: state,
+      msgRetryCounterCache,
+      generateHighQualityLinkPreview: true,
+      syncFullHistory: false,
+      downloadMediaMessage,
+      keepAliveIntervalMs: 30000,
+      connectTimeoutMs: 60000,
+      getMessage: async (key) => {
+        const stored = messageStore.get(`${key.remoteJid}:${key.id}`);
+        return stored || undefined;
+      },
+      retryRequestDelayMs: 5000,
+    });
 
-  // ─── Populate simple store contacts from events ───
-  conn.ev.on('contacts.upsert', (contacts) => {
-    for (const c of contacts) {
-      if (c.id) store.contacts[c.id] = c;
-    }
-  });
-  conn.ev.on('contacts.update', (updates) => {
-    for (const u of updates) {
-      if (u.id) store.contacts[u.id] = { ...(store.contacts[u.id] || {}), ...u };
-    }
-  });
+    // Update global reference — intervals use this to reach the live socket
+    activeConn = conn;
+    isConnecting = false;
 
-  // ─── Connection Updates ───
-  conn.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect } = update;
+    // ─── Contacts store ───
+    conn.ev.on('contacts.upsert', (contacts) => {
+      for (const c of contacts) {
+        if (c.id) store.contacts[c.id] = c;
+      }
+    });
+    conn.ev.on('contacts.update', (updates) => {
+      for (const u of updates) {
+        if (u.id) store.contacts[u.id] = { ...(store.contacts[u.id] || {}), ...u };
+      }
+    });
 
-    if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode;
+    // ─── Connection Updates ───
+    conn.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect } = update;
 
-      if (code === DisconnectReason.loggedOut || code === 401) {
-        _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and re-linking via pairing code...'));
-        try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
-        try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+      if (connection === 'close') {
+        activeConn = null; // clear so intervals don't fire on dead socket
+        const code = lastDisconnect?.error?.output?.statusCode;
+
+        if (code === DisconnectReason.loggedOut || code === 401) {
+          _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and re-linking...'));
+          try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
+          try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
+          reconnectAttempts = 0;
+          initialConnection = true;
+          setTimeout(() => connectToWhatsApp(), 5000);
+        } else if (code === 440) {
+          reconnectAttempts++;
+          const wait440 = reconnectAttempts <= 3 ? 60000 : Math.min(60000 * reconnectAttempts, 300000);
+          _origLog(chalk.yellow(`⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440/1000)}s...`));
+          setTimeout(() => connectToWhatsApp(), wait440);
+        } else if (code === 408 || code === 428 || code === 503) {
+          reconnectAttempts++;
+          const delay = Math.min(15000 * Math.pow(1.5, reconnectAttempts - 1), 120000);
+          _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
+          setTimeout(() => connectToWhatsApp(), delay);
+        } else {
+          reconnectAttempts++;
+          const delay = Math.min(8000 * reconnectAttempts, 60000);
+          _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay/1000)}s...`));
+          setTimeout(() => connectToWhatsApp(), delay);
+        }
+      }
+
+      if (connection === 'open') {
         reconnectAttempts = 0;
-        initialConnection = true;
-        setTimeout(() => connectToWhatsApp(), 3000);
-        return;
-      } else if (code === 440) {
-        // 440 = stream conflict — wait 60s to let WhatsApp fully clear the old session
-        reconnectAttempts++;
-        const wait440 = reconnectAttempts <= 3 ? 60000 : Math.min(60000 * reconnectAttempts, 300000);
-        _origLog(chalk.yellow(`⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440/1000)}s for WA to settle...`));
-        setTimeout(() => connectToWhatsApp(), wait440);
-      } else if (code === 408 || code === 428 || code === 503) {
-        // 408/428 = connection closed/timeout — back off so WA clears message queue
-        reconnectAttempts++;
-        const delay = Math.min(15000 * Math.pow(1.5, reconnectAttempts - 1), 120000);
-        _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
-        setTimeout(() => connectToWhatsApp(), delay);
-      } else {
-        reconnectAttempts++;
-        const delay = Math.min(8000 * reconnectAttempts, 60000);
-        _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay/1000)}s...`));
-        setTimeout(() => connectToWhatsApp(), delay);
+        if (initialConnection) {
+          initialConnection = false;
+          const botNum = conn.user?.id?.split(':')[0];
+          _origLog(lime(`\n✅ ${config.BOT_NAME} Connected!`));
+          _origLog(lime(`👑 Owner  : ${config.OWNER_NAME} (+${config.OWNER_NUMBER})`));
+          _origLog(lime(`📱 Number : ${botNum}`));
+          _origLog(lime(`📶 Mode   : ${config.MODE}`));
+          _origLog(lime(`🔧 Prefix : ${config.PREFIX}\n`));
+
+          try {
+            const selfJid = `${botNum}@s.whatsapp.net`;
+            await conn.sendMessage(selfJid, {
+              text: `╔══════════════════════╗\n║  *${config.BOT_NAME}* Online ✅  ║\n╚══════════════════════╝\n\n🤖 *Bot:* ${config.BOT_NAME}\n📱 *Number:* ${botNum}\n📶 *Mode:* ${config.MODE}\n👑 *Owner:* ${config.OWNER_NAME}\n🕒 *Time:* ${moment().tz('Africa/Nairobi').format('HH:mm:ss DD/MM/YYYY')}\n\n_Type ${config.PREFIX}menu to see all commands_ 🌩️`,
+            });
+          } catch (_) {}
+
+          // Resolve owner LID
+          try {
+            const ownerPhone = config.OWNER_NUMBER + '@s.whatsapp.net';
+            const results = await conn.onWhatsApp(config.OWNER_NUMBER);
+            const ownerInfo = Array.isArray(results) ? results[0] : results;
+            if (ownerInfo?.jid && ownerInfo.jid !== ownerPhone) {
+              lidMap.set(ownerInfo.jid, ownerPhone);
+              lidMap.set(ownerPhone, ownerInfo.jid);
+              _origLog(lime(`🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`));
+            }
+          } catch (_) {}
+        }
       }
-    }
+    });
 
-    if (connection === 'open') {
-      reconnectAttempts = 0;
-      if (initialConnection) {
-        initialConnection = false;
-        const botNum = conn.user?.id?.split(':')[0];
-        _origLog(lime(`\n✅ ${config.BOT_NAME} Connected!`));
-        _origLog(lime(`📱 Number : ${botNum}`));
-        _origLog(lime(`👑 Owner  : ${config.OWNER_NAME} (+${config.OWNER_NUMBER})`));
-        _origLog(lime(`📶 Mode   : ${config.MODE}`));
-        _origLog(lime(`🔧 Prefix : ${config.PREFIX}\n`));
+    conn.ev.on('creds.update', saveCreds);
 
-        // Notify the connected device (bot's own number = note to self)
+    // ─── LID map ───
+    const updateLidMap = (items) => {
+      for (const c of (Array.isArray(items) ? items : Object.values(items))) {
+        const lid = c.lid || c.lidJid;
+        const id = c.id || c.jid;
+        if (lid && id && !id.endsWith('@lid')) lidMap.set(lid, id);
+        if (c.id && !c.id.endsWith('@lid') && c.lidJid) lidMap.set(c.lidJid, c.id);
+      }
+    };
+    conn.ev.on('contacts.upsert', updateLidMap);
+    conn.ev.on('contacts.update', updateLidMap);
+    conn.ev.on('chats.upsert', updateLidMap);
+    conn.ev.on('chats.update', updateLidMap);
+    conn.ev.on('messaging-history.set', () => updateLidMap(Object.values(store.contacts || {})));
+
+    // ─── Messages ───
+    conn.ev.on('messages.upsert', async ({ messages, type }) => {
+      const isInteractiveResponse = (msg) => !!(
+        msg.message?.interactiveResponseMessage ||
+        msg.message?.viewOnceMessage?.message?.interactiveResponseMessage ||
+        msg.message?.buttonsResponseMessage ||
+        msg.message?.listResponseMessage ||
+        msg.message?.templateButtonReplyMessage
+      );
+      if (type !== 'notify' && type !== 'append' && !messages.some(isInteractiveResponse)) return;
+
+      for (let msg of messages) {
+        if (msg.key?.fromMe && type === 'append' && !isInteractiveResponse(msg)) continue;
+
         try {
-          const selfJid = `${botNum}@s.whatsapp.net`;
-          await conn.sendMessage(selfJid, {
-            text: `╔══════════════════════╗\n║  *${config.BOT_NAME}* Online ✅  ║\n╚══════════════════════╝\n\n🤖 *Bot:* ${config.BOT_NAME}\n📱 *Number:* ${botNum}\n📶 *Mode:* ${config.MODE}\n👑 *Owner:* ${config.OWNER_NAME}\n🕒 *Time:* ${moment().tz('Africa/Nairobi').format('HH:mm:ss DD/MM/YYYY')}\n\n_Type ${config.PREFIX}menu to see all commands_ 🌩️`,
-          });
-        } catch (_) {}
+          const tryResolveLid = (lid) => {
+            if (!lid || !lid.endsWith('@lid')) return lid;
+            let resolved = lidMap.get(lid);
+            if (!resolved) {
+              const contacts = Object.values(store?.contacts || {});
+              const match = contacts.find(c => (c.lid || c.lidJid) === lid);
+              if (match?.id) { resolved = match.id; lidMap.set(lid, resolved); }
+            }
+            return (resolved && !resolved.endsWith('@lid')) ? resolved : lid;
+          };
 
-        // Resolve owner's phone → @lid JID for group isOwner detection
-        try {
-          const ownerPhone = config.OWNER_NUMBER + '@s.whatsapp.net';
-          const results = await conn.onWhatsApp(config.OWNER_NUMBER);
-          const ownerInfo = Array.isArray(results) ? results[0] : results;
-          if (ownerInfo?.jid && ownerInfo.jid !== ownerPhone) {
-            lidMap.set(ownerInfo.jid, ownerPhone);
-            lidMap.set(ownerPhone, ownerInfo.jid);
-            _origLog(lime(`🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`));
+          if (msg.key?.remoteJid?.endsWith('@lid')) {
+            const resolved = tryResolveLid(msg.key.remoteJid);
+            if (resolved !== msg.key.remoteJid) {
+              msg = { ...msg, key: { ...msg.key, remoteJid: resolved } };
+            }
           }
-        } catch (_) {}
+          if (msg.key?.participant?.endsWith('@lid')) {
+            const resolved = tryResolveLid(msg.key.participant);
+            if (resolved !== msg.key.participant) {
+              msg = { ...msg, key: { ...msg.key, participant: resolved } };
+            }
+          }
 
+          if (msg.key?.remoteJid === 'status@broadcast') {
+            if (config.AUTO_STATUS_SEEN) await conn.readMessages([msg.key]).catch(() => {});
+            if (config.AUTO_STATUS_REACT) {
+              const emojis = ['❤️', '🔥', '😍', '💯', '👏', '✨', '🌟', '🎉'];
+              await conn.sendMessage('status@broadcast',
+                { react: { text: emojis[Math.floor(Math.random() * emojis.length)], key: msg.key } },
+                { statusJidList: [msg.key.participant] }
+              ).catch(() => {});
+            }
+            if (config.AUTO_STATUS_REPLY && config.STATUS_READ_MSG) {
+              await conn.sendMessage(msg.key.participant, { text: config.STATUS_READ_MSG }).catch(() => {});
+            }
+            continue;
+          }
+
+          if (msg.message) {
+            const storeKey = `${msg.key.remoteJid}:${msg.key.id}`;
+            messageStore.set(storeKey, msg.message);
+            if (!msg.key.fromMe) messageStore.set(msg.key.id, { msg, ts: Date.now() });
+            if (messageStore.size > 600) messageStore.delete(messageStore.keys().next().value);
+          }
+
+          if (config.AUTO_READ) await conn.readMessages([msg.key]).catch(() => {});
+
+          Handler(conn, msg, ALL_PLUGINS).catch(err => _origLog(chalk.red('[HANDLER ERROR]'), err?.message));
+
+        } catch (err) {
+          _origLog(chalk.red('[MSG ERROR]'), err?.message);
+        }
       }
-    }
-  });
+    });
 
-  conn.ev.on('creds.update', saveCreds);
-
-  // ─── Build LID → Phone JID map from contacts and chats ───
-  const updateLidMap = (items) => {
-    for (const c of (Array.isArray(items) ? items : Object.values(items))) {
-      // Contact with both id (phone JID) and lid
-      const lid = c.lid || c.lidJid;
-      const id = c.id || c.jid;
-      if (lid && id && !id.endsWith('@lid')) {
-        lidMap.set(lid, id);
-      }
-      // Chat with lidJid field
-      if (c.id && !c.id.endsWith('@lid') && c.lidJid) {
-        lidMap.set(c.lidJid, c.id);
-      }
-    }
-    if (lidMap.size > 0) {
-      _origLog(`[LID MAP] ${lidMap.size} entries resolved`);
-    }
-  };
-
-  conn.ev.on('contacts.upsert', updateLidMap);
-  conn.ev.on('contacts.update', updateLidMap);
-  conn.ev.on('chats.upsert', updateLidMap);
-  conn.ev.on('chats.update', updateLidMap);
-
-  // ─── Also resolve from store contacts on messaging-history.set ───
-  conn.ev.on('messaging-history.set', () => {
-    updateLidMap(Object.values(store.contacts || {}));
-  });
-
-  // ─── Always Online ───
-  if (config.ALWAYS_ONLINE) {
-    setInterval(() => conn.sendPresenceUpdate('available').catch(() => {}), 30000);
-  }
-
-  // ─── Heartbeat — prevents BeraHost 20-min idle kill ───
-  // BeraHost kills any bot with no stdout for 20 minutes (even if perfectly connected).
-  // Log a small heartbeat every 10 minutes so the process always has recent output.
-  setInterval(() => {
-    const uptime = Math.floor(process.uptime());
-    const h = Math.floor(uptime / 3600);
-    const m = Math.floor((uptime % 3600) / 60);
-    const s = uptime % 60;
-    _origLog(lime(`💓 Heartbeat — uptime ${h}h ${m}m ${s}s | msgs in store: ${messageStore.size}`));
-  }, 10 * 60 * 1000); // every 10 minutes
-
-  // ─── Messages ───
-  conn.ev.on('messages.upsert', async ({ messages, type }) => {
-    // 'notify' = normal incoming messages
-    // 'append' = messages from groups using @lid JIDs (multi-device) — must also be processed
-    const isInteractiveResponse = (msg) => !!(
-      msg.message?.interactiveResponseMessage ||
-      msg.message?.viewOnceMessage?.message?.interactiveResponseMessage ||
-      msg.message?.buttonsResponseMessage ||
-      msg.message?.listResponseMessage ||
-      msg.message?.templateButtonReplyMessage
-    );
-    // Accept 'notify' (normal) and 'append' (group @lid / multi-device button taps)
-    // But skip fromMe 'append' messages — those are the bot's OWN outgoing messages
-    if (type !== 'notify' && type !== 'append' && !messages.some(isInteractiveResponse)) return;
-
-    for (let msg of messages) {
-      // Skip the bot's own outgoing messages (fromMe append) — not user commands
-      if (msg.key?.fromMe && type === 'append' && !isInteractiveResponse(msg)) continue;
-
+    // ─── Anti-Delete ───
+    conn.ev.on('messages.delete', async (item) => {
+      if (!config.ANTI_DELETE) return;
       try {
-        // ─── Resolve @lid JIDs everywhere in the message key ───
-        const tryResolveLid = (lid) => {
-          if (!lid || !lid.endsWith('@lid')) return lid;
-          let resolved = lidMap.get(lid);
-          if (!resolved) {
-            const contacts = Object.values(store?.contacts || {});
-            const match = contacts.find(c => (c.lid || c.lidJid) === lid);
-            if (match?.id) { resolved = match.id; lidMap.set(lid, resolved); }
-          }
-          return (resolved && !resolved.endsWith('@lid')) ? resolved : lid;
-        };
+        const keys = item.keys || [];
+        for (const key of keys) {
+          const stored = messageStore.get(key.id);
+          if (!stored) continue;
+          const { msg } = stored;
+          const msgType = getContentType(msg.message);
+          const target = config.DELETE_PATH === 'pm'
+            ? `${config.OWNER_NUMBER}@s.whatsapp.net`
+            : msg.key.remoteJid;
+          const deleter = key.participant || msg.key.remoteJid;
 
-        // Resolve remoteJid (for DM @lid chats)
-        if (msg.key?.remoteJid?.endsWith('@lid')) {
-          const resolved = tryResolveLid(msg.key.remoteJid);
-          if (resolved !== msg.key.remoteJid) {
-            msg = { ...msg, key: { ...msg.key, remoteJid: resolved } };
-            _origLog(`[LID resolved] remoteJid ${msg.key.remoteJid} → ${resolved}`);
+          await conn.sendMessage(target, {
+            text: `🗑️ *Anti-Delete Alert!*\n\n👤 *From:* @${deleter.split('@')[0]}\n💬 *Chat:* ${msg.key.remoteJid}\n📄 *Type:* ${msgType}\n🕒 *Time:* ${moment().tz('Africa/Nairobi').format('HH:mm:ss')}`,
+            mentions: [deleter],
+          }).catch(() => {});
+
+          if (msgType === 'conversation' || msgType === 'extendedTextMessage') {
+            const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+            if (text) await conn.sendMessage(target, { text: `📝 *Deleted Message:*\n${text}` }).catch(() => {});
+          } else if (msgType === 'imageMessage') {
+            try {
+              const buf = await downloadMediaMessage(msg, 'buffer', {});
+              await conn.sendMessage(target, { image: buf, caption: '📸 *Deleted Image*' });
+            } catch {}
+          } else if (msgType === 'videoMessage') {
+            try {
+              const buf = await downloadMediaMessage(msg, 'buffer', {});
+              await conn.sendMessage(target, { video: buf, caption: '🎬 *Deleted Video*' });
+            } catch {}
           }
+          messageStore.delete(key.id);
         }
-
-        // Resolve participant (for group @lid senders)
-        if (msg.key?.participant?.endsWith('@lid')) {
-          const resolved = tryResolveLid(msg.key.participant);
-          if (resolved !== msg.key.participant) {
-            msg = { ...msg, key: { ...msg.key, participant: resolved } };
-            _origLog(`[LID resolved] participant → ${resolved}`);
-          }
-        }
-
-        // Status handling
-        if (msg.key?.remoteJid === 'status@broadcast') {
-          if (config.AUTO_STATUS_SEEN) await conn.readMessages([msg.key]).catch(() => {});
-          if (config.AUTO_STATUS_REACT) {
-            const emojis = ['❤️', '🔥', '😍', '💯', '👏', '✨', '🌟', '🎉'];
-            const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-            await conn.sendMessage('status@broadcast',
-              { react: { text: emoji, key: msg.key } },
-              { statusJidList: [msg.key.participant] }
-            ).catch(() => {});
-          }
-          if (config.AUTO_STATUS_REPLY && config.STATUS_READ_MSG) {
-            await conn.sendMessage(msg.key.participant, { text: config.STATUS_READ_MSG }).catch(() => {});
-          }
-          continue;
-        }
-
-        // Store for getMessage (decrypt retry) and anti-delete
-        if (msg.message) {
-          const storeKey = `${msg.key.remoteJid}:${msg.key.id}`;
-          messageStore.set(storeKey, msg.message);       // for getMessage callback
-          if (!msg.key.fromMe) {
-            messageStore.set(msg.key.id, { msg, ts: Date.now() }); // for anti-delete
-          }
-          if (messageStore.size > 600) {
-            const oldest = messageStore.keys().next().value;
-            messageStore.delete(oldest);
-          }
-        }
-
-        // Auto read
-        if (config.AUTO_READ) await conn.readMessages([msg.key]).catch(() => {});
-
-        // Process message — fire-and-forget so the WA socket stays unblocked
-        Handler(conn, msg, ALL_PLUGINS).catch(err => _origLog(chalk.red('[HANDLER ERROR]'), err?.message));
-
       } catch (err) {
-        _origLog(chalk.red('[MSG ERROR]'), err?.message);
+        _origLog('[ANTIDELETE ERROR]', err?.message);
       }
-    }
-  });
+    });
 
-  // ─── Anti-Delete ───
-  conn.ev.on('messages.delete', async (item) => {
-    if (!config.ANTI_DELETE) return;
-    try {
-      const keys = item.keys || [];
-      for (const key of keys) {
-        const stored = messageStore.get(key.id);
-        if (!stored) continue;
-        const { msg } = stored;
-        const msgType = getContentType(msg.message);
-        const target = config.DELETE_PATH === 'pm'
-          ? `${config.OWNER_NUMBER}@s.whatsapp.net`
-          : msg.key.remoteJid;
-        const deleter = key.participant || msg.key.remoteJid;
+    // ─── Calls ───
+    conn.ev.on('call', (call) => handleCall(conn, call));
 
-        await conn.sendMessage(target, {
-          text: `🗑️ *Anti-Delete Alert!*\n\n👤 *From:* @${deleter.split('@')[0]}\n💬 *Chat:* ${msg.key.remoteJid}\n📄 *Type:* ${msgType}\n🕒 *Time:* ${moment().tz('Africa/Nairobi').format('HH:mm:ss')}`,
-          mentions: [deleter],
-        }).catch(() => {});
+    // ─── Group Events ───
+    conn.ev.on('group-participants.update', async (update) => {
+      try { await onGroupUpdate(conn, update); } catch {}
+    });
 
-        if (msgType === 'conversation' || msgType === 'extendedTextMessage') {
-          const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-          if (text) await conn.sendMessage(target, { text: `📝 *Deleted Message:*\n${text}` }).catch(() => {});
-        } else if (msgType === 'imageMessage') {
-          try {
-            const buf = await downloadMediaMessage(msg, 'buffer', {});
-            await conn.sendMessage(target, { image: buf, caption: '📸 *Deleted Image*' });
-          } catch {}
-        } else if (msgType === 'videoMessage') {
-          try {
-            const buf = await downloadMediaMessage(msg, 'buffer', {});
-            await conn.sendMessage(target, { video: buf, caption: '🎬 *Deleted Video*' });
-          } catch {}
-        }
-        messageStore.delete(key.id);
-      }
-    } catch (err) {
-      _origLog('[ANTIDELETE ERROR]', err?.message);
-    }
-  });
-
-  // ─── Calls ───
-  conn.ev.on('call', (call) => handleCall(conn, call));
-
-  // ─── Group Events (Welcome/Goodbye) ───
-  conn.ev.on('group-participants.update', async (update) => {
-    try {
-      await onGroupUpdate(conn, update);
-    } catch {}
-  });
-
-  return conn;
+  } catch (err) {
+    isConnecting = false;
+    _origLog(chalk.red('[CONNECT ERROR]'), err?.message);
+    reconnectAttempts++;
+    const delay = Math.min(8000 * reconnectAttempts, 60000);
+    setTimeout(() => connectToWhatsApp(), delay);
+  }
 }
 
 // ─── Keep-Alive Server ───
@@ -504,6 +463,28 @@ app.get('/', (req, res) => res.json({
 }));
 
 app.listen(PORT, () => _origLog(lime(`🌐 Keep-alive server: port ${PORT}`)));
+
+// ─── GLOBAL SINGLETON INTERVALS ─────────────────────────────────────────────
+// These are created ONCE at startup and NEVER re-created on reconnect.
+// They use `activeConn` which is updated each time a new socket is made.
+// This prevents interval stacking (the bug that caused WA to kick the bot).
+
+// Always-online presence — fires every 60s (not 30s, to reduce WA pressure)
+setInterval(() => {
+  if (activeConn && config.ALWAYS_ONLINE) {
+    activeConn.sendPresenceUpdate('available').catch(() => {});
+  }
+}, 60000);
+
+// Heartbeat — prevents BeraHost 20-min idle kill — fires every 10 minutes
+setInterval(() => {
+  const uptime = Math.floor(process.uptime());
+  const h = Math.floor(uptime / 3600);
+  const m = Math.floor((uptime % 3600) / 60);
+  const s = uptime % 60;
+  const connected = activeConn ? '🟢' : '🔴';
+  _origLog(lime(`💓 Heartbeat ${connected} — uptime ${h}h ${m}m ${s}s | store: ${messageStore.size}`));
+}, 10 * 60 * 1000);
 
 // ─── Start ───
 connectToWhatsApp();
