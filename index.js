@@ -130,6 +130,21 @@ _origLog(orange(`
 ╚══════════════════════════════════╝
 `));
 
+
+// ─── BeraHost patch diagnostic ───
+try {
+  const { createRequire } = await import('module');
+  const _reqDiag = createRequire(import.meta.url);
+  const socketPath = _reqDiag.resolve('@whiskeysockets/baileys/lib/Socket/socket.js');
+  const socketContent = fs.readFileSync(socketPath, 'utf8');
+  // Look for BERAHOST marker or any injected code
+  const lines = socketContent.split('\n');
+  const patchLines = lines.filter(l => l.includes('BERAHOST') || l.includes('berahost') || l.includes('gifted'));
+  _origLog('[PATCH_DIAG] socket.js patch lines:', patchLines.slice(0,5).join(' | ') || 'none found');
+  // Log last 5 lines of socket.js (patches are often appended at the end)
+  _origLog('[PATCH_DIAG] socket.js last 5 lines:', lines.slice(-5).join(' | '));
+} catch(e) { _origLog('[PATCH_DIAG_ERR]', e.message); }
+
 // ─── Session Loader ───
 async function loadSession() {
   try {
@@ -301,6 +316,12 @@ async function connectToWhatsApp() {
     conn.ev.on('messaging-history.set', () => updateLidMap(Object.values(store.contacts || {})));
 
     // ─── Messages ───
+    // ─── ALL events diagnostic ───
+    conn.ev.process(async (events) => {
+      const evKeys = Object.keys(events);
+      if (evKeys.length > 0) _origLog('[EV_PROCESS]', evKeys.join(','));
+    });
+
     conn.ev.on('messages.upsert', async ({ messages, type }) => {
       _origLog('[MSG_DEBUG] upsert fired type=' + type + ' count=' + messages.length + ' fromMe=' + messages[0]?.key?.fromMe);
       const isInteractiveResponse = (msg) => !!(
