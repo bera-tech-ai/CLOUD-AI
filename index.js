@@ -140,10 +140,7 @@ try {
   // Look for BERAHOST marker or any injected code
   const lines = socketContent.split('\n');
   const patchLines = lines.filter(l => l.includes('BERAHOST') || l.includes('berahost') || l.includes('gifted'));
-  _origLog('[PATCH_DIAG] socket.js patch lines:', patchLines.slice(0,5).join(' | ') || 'none found');
   // Log last 5 lines of socket.js (patches are often appended at the end)
-  _origLog('[PATCH_DIAG] socket.js last 5 lines:', lines.slice(-5).join(' | '));
-} catch(e) { _origLog('[PATCH_DIAG_ERR]', e.message); }
 
 // ─── Session Loader ───
 async function loadSession() {
