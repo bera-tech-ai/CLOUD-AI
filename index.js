@@ -154,6 +154,15 @@ async function loadSession() {
     const creds = zlib.gunzipSync(Buffer.from(b64data, 'base64'));
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(credsPath, creds, 'utf8');
+
+    // Purge stale Signal session files that BeraHost may have restored from a
+    // previous deployment — mismatched keys silently kill messages.upsert delivery
+    for (const stale of fs.readdirSync(sessionDir)) {
+      if (stale !== 'creds.json') {
+        try { fs.unlinkSync(path.join(sessionDir, stale)); } catch (_) {}
+      }
+    }
+
     _origLog(lime('✅ Session loaded!'));
     return true;
   } catch (err) {
