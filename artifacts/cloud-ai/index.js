@@ -325,10 +325,14 @@ async function connectToWhatsApp() {
         msg.message?.templateButtonReplyMessage
       );
       // 'notify' = normal incoming messages
-      // non-notify with interactive = button tap responses (allow those through)
-      if (type !== 'notify' && !messages.some(isInteractiveResponse)) return;
+      // 'append' = group @lid / multi-device — MUST be processed too
+      // Skip everything else unless it contains a button/interactive response
+      if (type !== 'notify' && type !== 'append' && !messages.some(isInteractiveResponse)) return;
 
       for (let msg of messages) {
+        // Skip the bot's own outgoing 'append' messages — those are NOT user commands
+        if (msg.key?.fromMe && type === 'append' && !isInteractiveResponse(msg)) continue;
+
         try {
           // ─── Resolve @lid JIDs ───
           const tryResolveLid = (lid) => {
