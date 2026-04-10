@@ -384,29 +384,39 @@ IMPORTANT RULES:
 User request: "${request}"
 Command (start with dot):`;
 
-  // GitHub Models (gpt-4o-mini) — primary
-  const ghToken = process.env.GITHUB_TOKEN;
-  if (ghToken) {
-    try {
-      const res = await axios.post(
-        'https://models.inference.ai.azure.com/chat/completions',
-        {
-          model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: 'You are a WhatsApp bot command parser. You understand English, Kenyan Sheng, and Swahili. Output ONLY the bot command starting with a dot (.) — no explanation, no extra words.' },
-            { role: 'user', content: fullPrompt },
-          ],
-          max_tokens: 60,
-          temperature: 0.05,
-        },
-        { timeout: 15000, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ghToken}` } }
-      );
-      const raw = res.data?.choices?.[0]?.message?.content?.trim() || '';
-      if (raw) return extractCommand(raw, request);
-    } catch (_) {}
-  }
+  // POST method — most reliable
+  try {
+    const res = await axios.post(
+      'https://text.pollinations.ai/openai',
+      {
+        model: 'openai',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a WhatsApp bot command parser. You understand English, Kenyan Sheng, and Swahili. Output ONLY the bot command starting with a dot (.) — no explanation, no extra words.',
+          },
+          { role: 'user', content: fullPrompt },
+        ],
+        max_tokens: 100,
+        temperature: 0.05,
+      },
+      { timeout: 20000, headers: { 'Content-Type': 'application/json' } }
+    );
+    const raw = res.data?.choices?.[0]?.message?.content?.trim() || '';
+    return extractCommand(raw, request);
+  } catch (_) {}
 
-  // Hard fallback — if both AI backends fail, treat it as .gpt
+  // GET fallback
+  try {
+    const res = await axios.get(
+      `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}?model=openai&seed=-1`,
+      { timeout: 15000, responseType: 'text' }
+    );
+    const raw = typeof res.data === 'string' ? res.data.trim() : '';
+    return extractCommand(raw, request);
+  } catch (_) {}
+
+  // Hard fallback
   return `${p}gpt ${request}`;
 }
 
