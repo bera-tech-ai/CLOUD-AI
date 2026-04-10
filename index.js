@@ -131,17 +131,6 @@ _origLog(orange(`
 `));
 
 
-// ─── BeraHost patch diagnostic ───
-try {
-  const { createRequire } = await import('module');
-  const _reqDiag = createRequire(import.meta.url);
-  const socketPath = _reqDiag.resolve('@whiskeysockets/baileys/lib/Socket/socket.js');
-  const socketContent = fs.readFileSync(socketPath, 'utf8');
-  // Look for BERAHOST marker or any injected code
-  const lines = socketContent.split('\n');
-  const patchLines = lines.filter(l => l.includes('BERAHOST') || l.includes('berahost') || l.includes('gifted'));
-  // Log last 5 lines of socket.js (patches are often appended at the end)
-
 // ─── Session Loader ───
 async function loadSession() {
   try {
