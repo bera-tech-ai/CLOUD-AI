@@ -114,16 +114,12 @@ const store = { contacts: {} };
 // ─── Global crash guard ───
 process.on('uncaughtException', (err) => {
   _origLog(chalk.red(`⚠️ Uncaught Exception (handled): ${err.message}`));
-  if (/unsupported state|unable to authenticate/i.test(err.message || '')) {
-    sessionCorrupted = true;
-  }
+  // Note: DO NOT clear session on crypto errors — Baileys handles key re-exchange automatically
 });
 process.on('unhandledRejection', (reason) => {
   const msg = reason?.message || String(reason);
   _origLog(chalk.red(`⚠️ Unhandled Rejection (handled): ${msg}`));
-  if (/unsupported state|unable to authenticate/i.test(msg)) {
-    sessionCorrupted = true;
-  }
+  // Note: DO NOT clear session on crypto errors — Baileys handles key re-exchange automatically
 });
 
 // ─── Banner ───
@@ -137,11 +133,7 @@ _origLog(orange(`
 // ─── Session Loader ───
 async function loadSession() {
   try {
-    if (fs.existsSync(sessionDir)) {
-      fs.readdirSync(sessionDir).forEach(f => {
-        try { fs.unlinkSync(path.join(sessionDir, f)); } catch (_) {}
-      });
-    }
+    // NOTE: Do NOT wipe session dir — preserve pre-keys and sender chains so Baileys can decrypt messages
 
     let sessionId = config.SESSION_ID;
     if (!sessionId || typeof sessionId !== 'string') throw new Error('SESSION_ID missing');
@@ -176,14 +168,7 @@ async function connectToWhatsApp() {
   isConnecting = true;
 
   try {
-    // If crypto state was corrupted, wipe and reload session from Atassa
-    if (sessionCorrupted) {
-      _origLog(chalk.yellow('🔁 Session state corrupted — clearing and reloading from Atassa...'));
-      sessionCorrupted = false;
-      initialConnection = true;
-      try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
-      try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
-    }
+    // Bail out early if already connecting
 
     if (!fs.existsSync(credsPath)) {
       const sid = config.SESSION_ID;
