@@ -12,6 +12,7 @@ import {
 } from '@whiskeysockets/baileys';
 import { Handler, Callupdate } from './data/handler.js';
 import { lidMap } from './lib/Serializer.js';
+import { ensureYtDlp } from './lib/ytdlp.js';
 
 import express from 'express';
 import pino from 'pino';
@@ -64,8 +65,9 @@ const lime = chalk.bold.hex('#32CD32');
 const orange = chalk.bold.hex('#FFA500');
 let initialConnection = true;
 let reconnectAttempts = 0;
-let isConnecting = false;          // guard: prevents overlapping reconnect attempts
-let activeConn = null;             // always points to the current live socket
+let isConnecting = false;   // guard: one connection attempt at a time
+let activeConn = null;      // always points to the current live socket
+let sessionCorrupted = false; // set when crypto state becomes invalid
 const msgRetryCounterCache = new NodeCache();
 const messageStore = new Map();
 
@@ -75,7 +77,7 @@ const credsPath = path.join(sessionDir, 'creds.json');
 if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
 // ─── Suppress Baileys crypto noise ───
-const _origLog = console.log, _origErr = console.error, _origWarn = console.warn, _origInfo = console.info;
+const _origLog = console.log, _origErr = console.error, _origWarn = console.warn;
 const SUPPRESS = [
   /Closing session/i, /Closing open session/i, /SessionEntry/i, /indexInfo/i,
   /_chains/i, /ephemeralKeyPair/i, /rootKey/i, /baseKey/i, /pendingPreKey/i,
@@ -98,22 +100,18 @@ function suppress(fn) {
         return String(a ?? '');
       }).join(' ');
       if (SUPPRESS.some(p => p.test(str))) return;
-    } catch { /* pass through if check fails */ }
+    } catch { /* pass through */ }
     fn(...args);
   };
 }
 console.log   = suppress(_origLog);
 console.error = suppress(_origErr);
 console.warn  = suppress(_origWarn);
-console.info  = suppress(_origInfo);
 
 // ─── Simple contacts store ───
 const store = { contacts: {} };
 
-// ─── Session corruption flag ─────────────────────────────────────────────────
-let sessionCorrupted = false;
-
-// ─── Global crash guard ───────────────────────────────────────────────────────
+// ─── Global crash guard ───
 process.on('uncaughtException', (err) => {
   _origLog(chalk.red(`⚠️ Uncaught Exception (handled): ${err.message}`));
   if (/unsupported state|unable to authenticate/i.test(err.message || '')) {
@@ -136,7 +134,7 @@ _origLog(orange(`
 ╚══════════════════════════════════╝
 `));
 
-// ─── Session Loader (Exact Atassa logic) ───
+// ─── Session Loader ───
 async function loadSession() {
   try {
     if (fs.existsSync(sessionDir)) {
@@ -173,12 +171,12 @@ async function loadSession() {
 
 // ─── Connect ───
 async function connectToWhatsApp() {
-  // Guard: only one connection attempt at a time
+  // Guard: one connection attempt at a time
   if (isConnecting) return;
   isConnecting = true;
 
   try {
-    // If local session crypto state was corrupted, wipe it and reload from Atassa
+    // If crypto state was corrupted, wipe and reload session from Atassa
     if (sessionCorrupted) {
       _origLog(chalk.yellow('🔁 Session state corrupted — clearing and reloading from Atassa...'));
       sessionCorrupted = false;
@@ -192,7 +190,7 @@ async function connectToWhatsApp() {
       if (sid && sid !== 'Your_Session_Id') {
         const ok = await loadSession();
         if (!ok) {
-          _origLog(chalk.red('❌ Failed to load session. Check your SESSION_ID and restart.'));
+          _origLog(chalk.red('❌ Failed to load session. Check SESSION_ID and restart.'));
           process.exit(1);
         }
       } else {
@@ -214,24 +212,19 @@ async function connectToWhatsApp() {
       generateHighQualityLinkPreview: true,
       syncFullHistory: false,
       downloadMediaMessage,
-      keepAliveIntervalMs: 30000,
-      connectTimeoutMs: 60000,
       getMessage: async (key) => {
         const stored = messageStore.get(`${key.remoteJid}:${key.id}`);
         return stored || undefined;
       },
-      retryRequestDelayMs: 5000,
     });
 
-    // Update global reference — intervals use this to reach the live socket
+    // Update global ref — global intervals use this to reach the live socket
     activeConn = conn;
     isConnecting = false;
 
     // ─── Contacts store ───
     conn.ev.on('contacts.upsert', (contacts) => {
-      for (const c of contacts) {
-        if (c.id) store.contacts[c.id] = c;
-      }
+      for (const c of contacts) { if (c.id) store.contacts[c.id] = c; }
     });
     conn.ev.on('contacts.update', (updates) => {
       for (const u of updates) {
@@ -244,29 +237,29 @@ async function connectToWhatsApp() {
       const { connection, lastDisconnect } = update;
 
       if (connection === 'close') {
-        activeConn = null; // clear so intervals don't fire on dead socket
+        activeConn = null; // clear so global intervals don't fire on dead socket
         const code = lastDisconnect?.error?.output?.statusCode;
 
         if (code === DisconnectReason.loggedOut || code === 401) {
-          _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and re-linking...'));
+          _origLog(chalk.yellow('🔄 Session expired/logged out. Clearing and reconnecting...'));
           try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch (_) {}
           try { fs.mkdirSync(sessionDir, { recursive: true }); } catch (_) {}
           reconnectAttempts = 0;
           initialConnection = true;
-          setTimeout(() => connectToWhatsApp(), 5000);
+          setTimeout(() => connectToWhatsApp(), 3000);
         } else if (code === 440) {
           reconnectAttempts++;
           const wait440 = reconnectAttempts <= 3 ? 60000 : Math.min(60000 * reconnectAttempts, 300000);
           _origLog(chalk.yellow(`⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440/1000)}s...`));
           setTimeout(() => connectToWhatsApp(), wait440);
-        } else if (code === 408 || code === 428 || code === 503) {
+        } else if (code === 408 || code === 503) {
           reconnectAttempts++;
-          const delay = Math.min(15000 * Math.pow(1.5, reconnectAttempts - 1), 120000);
+          const delay = Math.min(5000 * Math.pow(1.5, reconnectAttempts), 60000);
           _origLog(chalk.yellow(`🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay/1000)}s...`));
           setTimeout(() => connectToWhatsApp(), delay);
         } else {
           reconnectAttempts++;
-          const delay = Math.min(8000 * reconnectAttempts, 60000);
+          const delay = Math.min(4000 * reconnectAttempts, 30000);
           _origLog(chalk.yellow(`🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay/1000)}s...`));
           setTimeout(() => connectToWhatsApp(), delay);
         }
@@ -331,18 +324,18 @@ async function connectToWhatsApp() {
         msg.message?.listResponseMessage ||
         msg.message?.templateButtonReplyMessage
       );
-      if (type !== 'notify' && type !== 'append' && !messages.some(isInteractiveResponse)) return;
+      // 'notify' = normal incoming messages
+      // non-notify with interactive = button tap responses (allow those through)
+      if (type !== 'notify' && !messages.some(isInteractiveResponse)) return;
 
       for (let msg of messages) {
-        if (msg.key?.fromMe && type === 'append' && !isInteractiveResponse(msg)) continue;
-
         try {
+          // ─── Resolve @lid JIDs ───
           const tryResolveLid = (lid) => {
             if (!lid || !lid.endsWith('@lid')) return lid;
             let resolved = lidMap.get(lid);
             if (!resolved) {
-              const contacts = Object.values(store?.contacts || {});
-              const match = contacts.find(c => (c.lid || c.lidJid) === lid);
+              const match = Object.values(store?.contacts || {}).find(c => (c.lid || c.lidJid) === lid);
               if (match?.id) { resolved = match.id; lidMap.set(lid, resolved); }
             }
             return (resolved && !resolved.endsWith('@lid')) ? resolved : lid;
@@ -361,6 +354,7 @@ async function connectToWhatsApp() {
             }
           }
 
+          // Status
           if (msg.key?.remoteJid === 'status@broadcast') {
             if (config.AUTO_STATUS_SEEN) await conn.readMessages([msg.key]).catch(() => {});
             if (config.AUTO_STATUS_REACT) {
@@ -376,16 +370,20 @@ async function connectToWhatsApp() {
             continue;
           }
 
+          // Store messages (anti-delete + getMessage retry)
           if (msg.message) {
-            const storeKey = `${msg.key.remoteJid}:${msg.key.id}`;
-            messageStore.set(storeKey, msg.message);
-            if (!msg.key.fromMe) messageStore.set(msg.key.id, { msg, ts: Date.now() });
+            messageStore.set(`${msg.key.remoteJid}:${msg.key.id}`, msg.message);
+            if (config.ANTI_DELETE && !msg.key.fromMe) {
+              messageStore.set(msg.key.id, { msg, ts: Date.now() });
+            }
             if (messageStore.size > 600) messageStore.delete(messageStore.keys().next().value);
           }
 
+          // Auto read
           if (config.AUTO_READ) await conn.readMessages([msg.key]).catch(() => {});
 
-          Handler(conn, msg, ALL_PLUGINS).catch(err => _origLog(chalk.red('[HANDLER ERROR]'), err?.message));
+          // Process message
+          await Handler(conn, msg, ALL_PLUGINS);
 
         } catch (err) {
           _origLog(chalk.red('[MSG ERROR]'), err?.message);
@@ -446,8 +444,7 @@ async function connectToWhatsApp() {
     isConnecting = false;
     _origLog(chalk.red('[CONNECT ERROR]'), err?.message);
     reconnectAttempts++;
-    const delay = Math.min(8000 * reconnectAttempts, 60000);
-    setTimeout(() => connectToWhatsApp(), delay);
+    setTimeout(() => connectToWhatsApp(), Math.min(4000 * reconnectAttempts, 30000));
   }
 }
 
@@ -461,30 +458,33 @@ app.get('/', (req, res) => res.json({
   mode: config.MODE,
   time: moment().tz('Africa/Nairobi').format('HH:mm:ss DD/MM/YYYY'),
 }));
-
 app.listen(PORT, () => _origLog(lime(`🌐 Keep-alive server: port ${PORT}`)));
 
 // ─── GLOBAL SINGLETON INTERVALS ─────────────────────────────────────────────
-// These are created ONCE at startup and NEVER re-created on reconnect.
-// They use `activeConn` which is updated each time a new socket is made.
-// This prevents interval stacking (the bug that caused WA to kick the bot).
+// Created ONCE here, NEVER inside connectToWhatsApp().
+// activeConn is updated each time a new socket is created.
+// When conn is closed, activeConn is set to null so intervals are silent.
 
-// Always-online presence — fires every 60s (not 30s, to reduce WA pressure)
+// Always-online presence — 60s (not 30s, to reduce WA pressure)
 setInterval(() => {
   if (activeConn && config.ALWAYS_ONLINE) {
     activeConn.sendPresenceUpdate('available').catch(() => {});
   }
 }, 60000);
 
-// Heartbeat — prevents BeraHost 20-min idle kill — fires every 10 minutes
+// Heartbeat — prevents BeraHost 20-min idle kill
 setInterval(() => {
-  const uptime = Math.floor(process.uptime());
-  const h = Math.floor(uptime / 3600);
-  const m = Math.floor((uptime % 3600) / 60);
-  const s = uptime % 60;
-  const connected = activeConn ? '🟢' : '🔴';
-  _origLog(lime(`💓 Heartbeat ${connected} — uptime ${h}h ${m}m ${s}s | store: ${messageStore.size}`));
+  const up = Math.floor(process.uptime());
+  const h = Math.floor(up / 3600), m = Math.floor((up % 3600) / 60), s = up % 60;
+  const st = activeConn ? '🟢 connected' : '🔴 reconnecting';
+  _origLog(lime(`💓 ${h}h${m}m${s}s | ${st} | store:${messageStore.size}`));
 }, 10 * 60 * 1000);
 
 // ─── Start ───
-connectToWhatsApp();
+// Ensure yt-dlp binary exists before connecting (downloads automatically if missing)
+ensureYtDlp()
+  .then(() => connectToWhatsApp())
+  .catch((err) => {
+    _origLog(chalk.yellow(`⚠️ yt-dlp unavailable: ${err.message} — download commands may be limited`));
+    connectToWhatsApp();
+  });
