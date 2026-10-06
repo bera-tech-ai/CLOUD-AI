@@ -144,7 +144,7 @@ async function loadSession() {
 
     if (!b64Check.startsWith('H4sI')) {
       _origLog(orange(`🔄 Fetching session from Atassa server...`));
-      const res = await axios.get(`https://session.giftedtech.co.ke/session/${b64Check}`, { timeout: 15000 });
+      const res = await axios.get(`https://session.gifted.co.ke/session/${b64Check}`, { timeout: 15000 });
       const fetched = (res.data || '').toString().trim();
       if (!fetched.startsWith('Gifted~H4sI')) throw new Error('Server returned invalid session');
       sessionId = fetched;
