@@ -12,7 +12,7 @@ const config = {
   PREFIX:            _state.PREFIX || process.env.PREFIX || ".",
   BOT_NAME:          _state.BOT_NAME || process.env.BOT_NAME || "ℂ𝕃𝕆𝕌𝔻 𝔸𝕀",
   OWNER_NAME:        process.env.OWNER_NAME || "𝔹ℝ𝕌ℂ𝔼 𝔹𝔼ℝ𝔸",
-  OWNER_NUMBER:      process.env.OWNER_NUMBER || "",
+  OWNER_NUMBER:      process.env.OWNER_NUMBER || "254116763755",
   DESCRIPTION:       process.env.DESCRIPTION || "© 𝔹ℝ𝕌ℂ𝔼 𝔹𝔼ℝ𝔸",
   MENU_IMAGE:        process.env.MENU_IMAGE || "https://files.catbox.moe/7l1tt5.jpg",
   MODE:              _state.MODE || process.env.MODE || "public",
