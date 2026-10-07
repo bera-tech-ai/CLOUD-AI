@@ -122,7 +122,8 @@ const messageStore =
 // Do not reuse the password previously exposed in chat.
 
 const MONGODB_URI =
-  'mongodb+srv://ellyongiro8:REPLACE_WITH_YOUR_ROTATED_PASSWORD@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+  'mongodb+srv://ellyongiro8:QwXDXE6tyrGpUTNb@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+';
 
 const MONGODB_DB =
   'cloud_ai';
