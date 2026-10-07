@@ -21,6 +21,7 @@
     "fs-extra": "^11.2.0",
     "gifted-btns": "^1.0.2",
     "moment-timezone": "^0.5.45",
+    "mongodb": "^6.20.0",
     "node-cache": "^5.1.2",
     "pino": "^9.0.0",
     "play-dl": "^1.9.7",
