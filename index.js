@@ -6,11 +6,13 @@ import {
   Browsers,
   fetchLatestBaileysVersion,
   DisconnectReason,
-  useMultiFileAuthState,
   makeCacheableSignalKeyStore,
+  initAuthCreds,
   getContentType,
   downloadMediaMessage,
 } from '@whiskeysockets/baileys';
+
+import { MongoClient } from 'mongodb';
 
 import { Handler, Callupdate } from './data/handler.js';
 import { lidMap } from './lib/Serializer.js';
@@ -18,12 +20,9 @@ import { ensureYtDlp } from './lib/ytdlp.js';
 
 import express from 'express';
 import pino from 'pino';
-import fs from 'fs';
 import NodeCache from 'node-cache';
-import path from 'path';
 import chalk from 'chalk';
 import moment from 'moment-timezone';
-import readline from 'readline';
 import config from './config.cjs';
 
 // ─── Plugins ───
@@ -51,41 +50,111 @@ import btnmenuPlugin from './plugins/btnmenu.js';
 import dbaPlugin from './plugins/dba.js';
 
 const ALL_PLUGINS = [
-  beraPlugin,   // MUST be first — rewrites m.body before other plugins run
+  beraPlugin,
   btnmenuPlugin,
-  generalPlugin, aiPlugin, imaginePlugin, animePlugin, photoPlugin,
-  downloaderPlugin, converterPlugin, toolsPlugin, extraPlugin,
-  groupPlugin, ownerPlugin, searchPlugin, gamesPlugin, settingsPlugin,
-  techPlugin, funPlugin, infoPlugin, dbaPlugin,
+  generalPlugin,
+  aiPlugin,
+  imaginePlugin,
+  animePlugin,
+  photoPlugin,
+  downloaderPlugin,
+  converterPlugin,
+  toolsPlugin,
+  extraPlugin,
+  groupPlugin,
+  ownerPlugin,
+  searchPlugin,
+  gamesPlugin,
+  settingsPlugin,
+  techPlugin,
+  funPlugin,
+  infoPlugin,
+  dbaPlugin,
 ];
 
-// ─── Setup ───
+// ══════════════════════════════════════════════════════════════
+// CONFIGURATION
+// ══════════════════════════════════════════════════════════════
+
 const app = express();
-const PORT = parseInt(process.env.PORT) || 3000;
-const lime = chalk.bold.hex('#32CD32');
-const orange = chalk.bold.hex('#FFA500');
+
+const PORT =
+  parseInt(process.env.PORT || '3000', 10);
+
+/*
+ * CHANGE THIS VALUE.
+ *
+ * Do NOT use the MongoDB password you pasted into chat.
+ * Rotate that password in MongoDB Atlas first.
+ */
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  'mongodb+srv://ellyongiro8:QwXDXE6tyrGpUTNb@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
+';
+
+const MONGODB_DB =
+  process.env.MONGODB_DB ||
+  'cloud_ai';
+
+const MONGODB_COLLECTION =
+  process.env.MONGODB_COLLECTION ||
+  'baileys_auth';
+
+const SESSION_ID =
+  process.env.BAILEYS_SESSION_ID ||
+  'cloud-ai-main';
+
+const lime =
+  chalk.bold.hex('#32CD32');
+
+const orange =
+  chalk.bold.hex('#FFA500');
+
+// ══════════════════════════════════════════════════════════════
+// GLOBAL STATE
+// ══════════════════════════════════════════════════════════════
+
+let mongoClient = null;
+let authCollection = null;
+
+let activeConn = null;
+
+let reconnectTimer = null;
+
+let reconnectAttempts = 0;
+
+let isConnecting = false;
+
+let socketGeneration = 0;
+
+let shuttingDown = false;
 
 let initialConnection = true;
-let reconnectAttempts = 0;
-let isConnecting = false;
-let activeConn = null;
-let sessionCorrupted = false;
 
-const msgRetryCounterCache = new NodeCache();
-const messageStore = new Map();
+let pairingRequested = false;
 
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
-const sessionDir = path.join(__dirname, 'session');
-const phoneFile = path.join(sessionDir, '.phone');
+const msgRetryCounterCache =
+  new NodeCache();
 
-if (!fs.existsSync(sessionDir)) {
-  fs.mkdirSync(sessionDir, { recursive: true });
-}
+const messageStore =
+  new Map();
 
-// ─── Suppress Baileys crypto noise ───
-const _origLog = console.log;
-const _origErr = console.error;
-const _origWarn = console.warn;
+const store = {
+  contacts: {}
+};
+
+// ══════════════════════════════════════════════════════════════
+// LOGGING
+// ══════════════════════════════════════════════════════════════
+
+const _origLog =
+  console.log;
+
+const _origErr =
+  console.error;
+
+const _origWarn =
+  console.warn;
 
 const SUPPRESS = [
   /Closing session/i,
@@ -124,302 +193,631 @@ const SUPPRESS = [
 function suppress(fn) {
   return (...args) => {
     try {
-      const str = args.map(a => {
-        if (typeof a === 'string') return a;
+      const str =
+        args
+          .map((a) => {
+            if (typeof a === 'string') {
+              return a;
+            }
 
-        if (a && typeof a === 'object') {
-          if (
-            a._chains ||
-            a.currentRatchet ||
-            a.indexInfo
-          ) {
-            return '[SessionEntry]';
-          }
+            if (
+              a &&
+              typeof a === 'object'
+            ) {
+              if (
+                a._chains ||
+                a.currentRatchet ||
+                a.indexInfo
+              ) {
+                return '[SessionEntry]';
+              }
 
-          try {
-            return JSON.stringify(a);
-          } catch {
-            return String(a);
-          }
-        }
+              try {
+                return JSON.stringify(a);
+              } catch {
+                return String(a);
+              }
+            }
 
-        return String(a ?? '');
-      }).join(' ');
+            return String(a ?? '');
+          })
+          .join(' ');
 
-      if (SUPPRESS.some(p => p.test(str))) {
+      if (
+        SUPPRESS.some((p) =>
+          p.test(str)
+        )
+      ) {
         return;
       }
-    } catch {
-      // pass through
-    }
+    } catch {}
 
     fn(...args);
   };
 }
 
-console.log = suppress(_origLog);
-console.error = suppress(_origErr);
-console.warn = suppress(_origWarn);
+console.log =
+  suppress(_origLog);
 
-// ─── Simple contacts store ───
-const store = {
-  contacts: {}
-};
+console.error =
+  suppress(_origErr);
 
-// ─── Global crash guard ───
-process.on('uncaughtException', (err) => {
-  _origLog(
-    chalk.red(
-      `⚠️ Uncaught Exception (handled): ${err.message}`
-    )
-  );
+console.warn =
+  suppress(_origWarn);
 
-  // DO NOT clear session on crypto errors.
-  // Baileys handles key re-exchange automatically.
-});
+// ══════════════════════════════════════════════════════════════
+// CRASH GUARD
+// ══════════════════════════════════════════════════════════════
 
-process.on('unhandledRejection', (reason) => {
-  const msg = reason?.message || String(reason);
+process.on(
+  'uncaughtException',
+  (err) => {
+    _origLog(
+      chalk.red(
+        `⚠️ Uncaught Exception: ${err?.stack || err?.message || err}`
+      )
+    );
+  }
+);
 
-  _origLog(
-    chalk.red(
-      `⚠️ Unhandled Rejection (handled): ${msg}`
-    )
-  );
+process.on(
+  'unhandledRejection',
+  (reason) => {
+    _origLog(
+      chalk.red(
+        `⚠️ Unhandled Rejection: ${
+          reason?.stack ||
+          reason?.message ||
+          String(reason)
+        }`
+      )
+    );
+  }
+);
 
-  // DO NOT clear session on crypto errors.
-  // Baileys handles key re-exchange automatically.
-});
+// ══════════════════════════════════════════════════════════════
+// BANNER
+// ══════════════════════════════════════════════════════════════
 
-// ─── Banner ───
-_origLog(orange(`
+_origLog(
+  orange(`
 ╔══════════════════════════════════╗
 ║         ℂ𝕃𝕆𝕌𝔻 𝔸𝕀  v3.2          ║
 ║     by 𝔹ℝ𝕌ℂ𝔼 𝔹𝔼ℝ𝔸              ║
 ╚══════════════════════════════════╝
-`));
+`)
+);
 
 // ══════════════════════════════════════════════════════════════
-// PAIRING-CODE AUTHENTICATION
+// MONGODB
 // ══════════════════════════════════════════════════════════════
 
-// ─── Normalize phone number ───
-function normalizePhoneNumber(number) {
-  return String(number || '')
-    .replace(/[^0-9]/g, '');
-}
-
-// ─── Save pairing number ───
-function savePairingNumber(number) {
-  try {
-    const normalized = normalizePhoneNumber(number);
-
-    if (!normalized) {
-      return false;
-    }
-
-    fs.writeFileSync(
-      phoneFile,
-      normalized,
-      'utf8'
-    );
-
-    return true;
-  } catch (err) {
-    _origLog(
-      chalk.red(
-        `❌ Failed to save pairing number: ${err.message}`
-      )
-    );
-
-    return false;
+async function connectMongo() {
+  if (authCollection) {
+    return authCollection;
   }
-}
 
-// ─── Load pairing number ───
-function loadPairingNumber() {
-  try {
-    if (!fs.existsSync(phoneFile)) {
-      return null;
-    }
-
-    const number = fs
-      .readFileSync(phoneFile, 'utf8')
-      .trim();
-
-    return normalizePhoneNumber(number);
-  } catch {
-    return null;
+  if (!MONGODB_URI) {
+    throw new Error(
+      'MONGODB_URI is not configured.'
+    );
   }
-}
 
-// ─── Delete pairing number ───
-function deletePairingNumber() {
-  try {
-    if (fs.existsSync(phoneFile)) {
-      fs.unlinkSync(phoneFile);
-    }
-  } catch {}
-}
+  _origLog(
+    chalk.cyan(
+      '🍃 Connecting to MongoDB...'
+    )
+  );
 
-// ─── Ask for phone number ───
-async function askForPhoneNumber() {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    rl.question(
-      chalk.cyan(
-        '\n📱 Enter WhatsApp number with country code (example: 2547XXXXXXXX): '
-      ),
-      (answer) => {
-        rl.close();
-
-        const number =
-          normalizePhoneNumber(answer);
-
-        if (!number) {
-          resolve(null);
-          return;
-        }
-
-        savePairingNumber(number);
-
-        resolve(number);
+  mongoClient =
+    new MongoClient(
+      MONGODB_URI,
+      {
+        maxPoolSize: 10,
+        serverSelectionTimeoutMS: 10000,
       }
     );
-  });
-}
 
-// ─── Get phone number for pairing ───
-async function getPairingNumber() {
-  // 1. Previously saved number
-  let number = loadPairingNumber();
+  await mongoClient.connect();
 
-  if (number) {
-    return number;
-  }
+  const db =
+    mongoClient.db(MONGODB_DB);
 
-  // 2. PAIRING_NUMBER environment variable
-  if (process.env.PAIRING_NUMBER) {
-    number = normalizePhoneNumber(
-      process.env.PAIRING_NUMBER
+  authCollection =
+    db.collection(
+      MONGODB_COLLECTION
     );
 
-    if (number) {
-      savePairingNumber(number);
-      return number;
+  await authCollection.createIndex(
+    {
+      sessionId: 1,
+      type: 1,
+      key: 1,
+    },
+    {
+      unique: true,
     }
-  }
-
-  // 3. OWNER_NUMBER from config
-  if (config?.OWNER_NUMBER) {
-    number = normalizePhoneNumber(
-      config.OWNER_NUMBER
-    );
-
-    if (number) {
-      savePairingNumber(number);
-      return number;
-    }
-  }
-
-  // 4. Ask through terminal
-  return await askForPhoneNumber();
-}
-
-// ─── Display pairing code ───
-function showPairingCode(code) {
-  _origLog(
-    chalk.cyan(`
-╔══════════════════════════════════════════╗
-║          WHATSAPP PAIRING CODE           ║
-╠══════════════════════════════════════════╣
-║                                          ║
-║              ${code}                    ║
-║                                          ║
-╚══════════════════════════════════════════╝
-`)
   );
 
   _origLog(
-    chalk.yellow(
-      '📱 WhatsApp → Linked Devices → Link a Device'
+    chalk.green(
+      `✅ MongoDB connected: ${MONGODB_DB}`
     )
   );
 
-  _origLog(
-    chalk.yellow(
-      '➡️  Choose "Link with phone number instead"'
-    )
-  );
-
-  _origLog('');
-}
-
-// ─── Clear local authentication ───
-function clearSession() {
-  try {
-    fs.rmSync(sessionDir, {
-      recursive: true,
-      force: true,
-    });
-  } catch (_) {}
-
-  try {
-    fs.mkdirSync(sessionDir, {
-      recursive: true,
-    });
-  } catch (_) {}
-
-  deletePairingNumber();
+  return authCollection;
 }
 
 // ══════════════════════════════════════════════════════════════
-// CONNECT
+// SERIALIZATION
+// ══════════════════════════════════════════════════════════════
+
+function serializeValue(value) {
+  if (
+    Buffer.isBuffer(value)
+  ) {
+    return {
+      __type: 'Buffer',
+      data: value.toString('base64'),
+    };
+  }
+
+  if (
+    value instanceof Uint8Array
+  ) {
+    return {
+      __type: 'Buffer',
+      data: Buffer
+        .from(value)
+        .toString('base64'),
+    };
+  }
+
+  if (
+    Array.isArray(value)
+  ) {
+    return value.map(
+      serializeValue
+    );
+  }
+
+  if (
+    value &&
+    typeof value === 'object'
+  ) {
+    const result = {};
+
+    for (
+      const [key, val]
+      of Object.entries(value)
+    ) {
+      result[key] =
+        serializeValue(val);
+    }
+
+    return result;
+  }
+
+  return value;
+}
+
+function deserializeValue(value) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    value.__type === 'Buffer' &&
+    typeof value.data === 'string'
+  ) {
+    return Buffer.from(
+      value.data,
+      'base64'
+    );
+  }
+
+  if (
+    Array.isArray(value)
+  ) {
+    return value.map(
+      deserializeValue
+    );
+  }
+
+  if (
+    value &&
+    typeof value === 'object'
+  ) {
+    const result = {};
+
+    for (
+      const [key, val]
+      of Object.entries(value)
+    ) {
+      result[key] =
+        deserializeValue(val);
+    }
+
+    return result;
+  }
+
+  return value;
+}
+
+// ══════════════════════════════════════════════════════════════
+// MONGODB BAILEYS AUTH STATE
+// ══════════════════════════════════════════════════════════════
+
+async function useMongoAuthState(
+  sessionId
+) {
+  const collection =
+    await connectMongo();
+
+  const credsDocument =
+    await collection.findOne({
+      sessionId,
+      type: 'creds',
+    });
+
+  let creds;
+
+  if (credsDocument?.data) {
+    creds =
+      deserializeValue(
+        credsDocument.data
+      );
+
+    _origLog(
+      chalk.green(
+        '🔐 Existing Baileys credentials loaded from MongoDB.'
+      )
+    );
+  } else {
+    creds =
+      initAuthCreds();
+
+    _origLog(
+      chalk.yellow(
+        '🆕 No Baileys credentials found. Pairing will be required.'
+      )
+    );
+  }
+
+  const keys = {
+    get: async (
+      type,
+      ids
+    ) => {
+      const documents =
+        await collection
+          .find({
+            sessionId,
+            type: `key:${type}`,
+            key: {
+              $in: ids,
+            },
+          })
+          .toArray();
+
+      const result = {};
+
+      for (
+        const id of ids
+      ) {
+        const document =
+          documents.find(
+            (doc) =>
+              doc.key === id
+          );
+
+        if (
+          document?.data !==
+          undefined
+        ) {
+          result[id] =
+            deserializeValue(
+              document.data
+            );
+        }
+      }
+
+      return result;
+    },
+
+    set: async (
+      data
+    ) => {
+      const operations = [];
+
+      for (
+        const [type, entries]
+        of Object.entries(data)
+      ) {
+        for (
+          const [id, value]
+          of Object.entries(entries)
+        ) {
+          const filter = {
+            sessionId,
+            type: `key:${type}`,
+            key: id,
+          };
+
+          if (
+            value === null ||
+            value === undefined
+          ) {
+            operations.push({
+              deleteOne: {
+                filter,
+              },
+            });
+          } else {
+            operations.push({
+              updateOne: {
+                filter,
+                update: {
+                  $set: {
+                    sessionId,
+                    type: `key:${type}`,
+                    key: id,
+                    data:
+                      serializeValue(
+                        value
+                      ),
+                    updatedAt:
+                      new Date(),
+                  },
+                },
+                upsert: true,
+              },
+            });
+          }
+        }
+      }
+
+      if (
+        operations.length
+      ) {
+        await collection.bulkWrite(
+          operations,
+          {
+            ordered: false,
+          }
+        );
+      }
+    },
+  };
+
+  const saveCreds =
+    async () => {
+      await collection.updateOne(
+        {
+          sessionId,
+          type: 'creds',
+        },
+        {
+          $set: {
+            sessionId,
+            type: 'creds',
+            data:
+              serializeValue(
+                creds
+              ),
+            updatedAt:
+              new Date(),
+          },
+        },
+        {
+          upsert: true,
+        }
+      );
+    };
+
+  return {
+    state: {
+      creds,
+      keys,
+    },
+    saveCreds,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// DELETE AUTHENTICATION
+// ══════════════════════════════════════════════════════════════
+
+async function clearMongoSession() {
+  if (!authCollection) {
+    return;
+  }
+
+  await authCollection.deleteMany({
+    sessionId:
+      SESSION_ID,
+  });
+
+  _origLog(
+    chalk.yellow(
+      '🗑️ Baileys authentication removed from MongoDB.'
+    )
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// PHONE NUMBER
+// ══════════════════════════════════════════════════════════════
+
+function normalizePhoneNumber(
+  number
+) {
+  return String(number || '')
+    .replace(
+      /[^0-9]/g,
+      ''
+    );
+}
+
+function getPairingNumber() {
+  const number =
+    normalizePhoneNumber(
+      process.env.PAIRING_NUMBER ||
+      config?.OWNER_NUMBER ||
+      ''
+    );
+
+  return number || null;
+}
+
+// ══════════════════════════════════════════════════════════════
+// RECONNECT CONTROL
+// ══════════════════════════════════════════════════════════════
+
+function clearReconnectTimer() {
+  if (
+    reconnectTimer
+  ) {
+    clearTimeout(
+      reconnectTimer
+    );
+
+    reconnectTimer =
+      null;
+  }
+}
+
+function scheduleReconnect(
+  reason = 'unknown'
+) {
+  if (shuttingDown) {
+    return;
+  }
+
+  if (
+    reconnectTimer
+  ) {
+    return;
+  }
+
+  reconnectAttempts++;
+
+  const delay =
+    Math.min(
+      5000 *
+        Math.pow(
+          1.5,
+          reconnectAttempts - 1
+        ),
+      60000
+    );
+
+  _origLog(
+    chalk.yellow(
+      `🔄 Reconnecting because of ${reason}. Attempt ${reconnectAttempts} in ${Math.round(delay / 1000)}s...`
+    )
+  );
+
+  reconnectTimer =
+    setTimeout(
+      async () => {
+        reconnectTimer =
+          null;
+
+        await connectToWhatsApp();
+      },
+      delay
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// SOCKET VALIDATION
+// ══════════════════════════════════════════════════════════════
+
+function isCurrentSocket(
+  conn,
+  generation
+) {
+  return (
+    !shuttingDown &&
+    activeConn === conn &&
+    socketGeneration ===
+      generation
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// MAIN CONNECTION
 // ══════════════════════════════════════════════════════════════
 
 async function connectToWhatsApp() {
-  // Guard: one connection attempt at a time
-  if (isConnecting) return;
+  if (shuttingDown) {
+    return;
+  }
+
+  /*
+   * VERY IMPORTANT:
+   *
+   * Never create another socket if one already exists.
+   */
+  if (
+    activeConn ||
+    isConnecting
+  ) {
+    return;
+  }
 
   isConnecting = true;
 
-  let pairingRequested = false;
+  clearReconnectTimer();
+
+  const generation =
+    ++socketGeneration;
 
   try {
-    // ─── Local Multi-File Auth State ───
+    // ──────────────────────────────────────────────────────────
+    // LOAD AUTH FROM MONGODB
+    // ──────────────────────────────────────────────────────────
+
     const {
       state,
-      saveCreds
-    } = await useMultiFileAuthState(
-      sessionDir
-    );
+      saveCreds,
+    } =
+      await useMongoAuthState(
+        SESSION_ID
+      );
 
-    // ─── Baileys Version ───
+    // ──────────────────────────────────────────────────────────
+    // BAILEYS VERSION
+    // ──────────────────────────────────────────────────────────
+
     const {
-      version
-    } = await fetchLatestBaileysVersion();
+      version,
+    } =
+      await fetchLatestBaileysVersion();
 
     _origLog(
       chalk.gray(
-        `📦 Baileys version: ${version.join('.')}`
+        `📦 WhatsApp Web version: ${version.join('.')}`
       )
     );
 
-    // ─── Pairing number only required before registration ───
-    let pairingNumber = null;
+    // ──────────────────────────────────────────────────────────
+    // PAIRING
+    // ──────────────────────────────────────────────────────────
 
-    if (!state.creds.registered) {
-      pairingNumber = await getPairingNumber();
+    let pairingNumber =
+      null;
 
-      if (!pairingNumber) {
-        isConnecting = false;
+    if (
+      !state.creds.registered
+    ) {
+      pairingNumber =
+        getPairingNumber();
 
+      if (
+        !pairingNumber
+      ) {
         throw new Error(
-          'No phone number supplied for pairing.'
+          'No PAIRING_NUMBER or OWNER_NUMBER configured.'
         );
       }
 
@@ -430,59 +828,90 @@ async function connectToWhatsApp() {
       );
     }
 
-    // ─── Create WhatsApp socket ───
-    const conn = makeWASocket({
-      version,
+    // ──────────────────────────────────────────────────────────
+    // CREATE SOCKET
+    // ──────────────────────────────────────────────────────────
 
-      logger: pino({
-        level: 'warn'
-      }),
+    const conn =
+      makeWASocket({
+        version,
 
-      printQRInTerminal: false,
-
-      browser: Browsers.ubuntu('Chrome'),
-
-      auth: {
-        creds: state.creds,
-
-        keys: makeCacheableSignalKeyStore(
-          state.keys,
+        logger:
           pino({
-            level: 'warn'
-          })
-        ),
-      },
+            level: 'warn',
+          }),
 
-      msgRetryCounterCache,
+        printQRInTerminal:
+          false,
 
-      generateHighQualityLinkPreview: true,
+        browser:
+          Browsers.ubuntu(
+            'Chrome'
+          ),
 
-      syncFullHistory: false,
+        auth: {
+          creds:
+            state.creds,
 
-      downloadMediaMessage,
+          keys:
+            makeCacheableSignalKeyStore(
+              state.keys,
+              pino({
+                level: 'warn',
+              })
+            ),
+        },
 
-      getMessage: async (key) => {
-        const stored =
-          messageStore.get(
-            `${key.remoteJid}:${key.id}`
-          );
+        msgRetryCounterCache,
 
-        return stored || undefined;
-      },
-    });
+        generateHighQualityLinkPreview:
+          true,
 
-    // Update global ref
-    activeConn = conn;
+        syncFullHistory:
+          false,
 
-    isConnecting = false;
+        getMessage:
+          async (key) => {
+            const stored =
+              messageStore.get(
+                `${key.remoteJid}:${key.id}`
+              );
 
-    // ─── Contacts store ───
+            return (
+              stored ||
+              undefined
+            );
+          },
+      });
+
+    activeConn =
+      conn;
+
+    isConnecting =
+      false;
+
+    pairingRequested =
+      false;
+
+    _origLog(
+      chalk.cyan(
+        `🔌 Socket created [generation ${generation}]`
+      )
+    );
+
+    // ══════════════════════════════════════════════════════════
+    // CONTACTS
+    // ══════════════════════════════════════════════════════════
+
     conn.ev.on(
       'contacts.upsert',
       (contacts) => {
-        for (const c of contacts) {
+        for (
+          const c of contacts
+        ) {
           if (c.id) {
-            store.contacts[c.id] = c;
+            store.contacts[c.id] =
+              c;
           }
         }
       }
@@ -491,11 +920,15 @@ async function connectToWhatsApp() {
     conn.ev.on(
       'contacts.update',
       (updates) => {
-        for (const u of updates) {
+        for (
+          const u of updates
+        ) {
           if (u.id) {
             store.contacts[u.id] = {
-              ...(store.contacts[u.id] || {}),
-              ...u
+              ...(store.contacts[
+                u.id
+              ] || {}),
+              ...u,
             };
           }
         }
@@ -503,16 +936,29 @@ async function connectToWhatsApp() {
     );
 
     // ══════════════════════════════════════════════════════════
-    // CONNECTION UPDATES
+    // CONNECTION UPDATE
     // ══════════════════════════════════════════════════════════
 
     conn.ev.on(
       'connection.update',
       async (update) => {
+        /*
+         * Ignore events from an old socket.
+         *
+         * This is one of the most important fixes.
+         */
+        if (
+          !isCurrentSocket(
+            conn,
+            generation
+          )
+        ) {
+          return;
+        }
+
         const {
           connection,
           lastDisconnect,
-          qr
         } = update;
 
         // ──────────────────────────────────────────────────────
@@ -520,17 +966,19 @@ async function connectToWhatsApp() {
         // ──────────────────────────────────────────────────────
 
         if (
-          qr &&
-          pairingNumber &&
+          connection ===
+            'connecting' &&
           !state.creds.registered &&
+          pairingNumber &&
           !pairingRequested
         ) {
-          pairingRequested = true;
+          pairingRequested =
+            true;
 
           try {
             _origLog(
               chalk.cyan(
-                '\n🔐 Requesting WhatsApp pairing code...'
+                '🔐 Requesting WhatsApp pairing code...'
               )
             );
 
@@ -539,10 +987,32 @@ async function connectToWhatsApp() {
                 pairingNumber
               );
 
-            showPairingCode(code);
+            _origLog(
+              chalk.cyan(`
+╔══════════════════════════════════════════╗
+║          WHATSAPP PAIRING CODE           ║
+╠══════════════════════════════════════════╣
+║                                          ║
+║              ${code}                    ║
+║                                          ║
+╚══════════════════════════════════════════╝
+`)
+            );
 
+            _origLog(
+              chalk.yellow(
+                '📱 WhatsApp → Linked Devices → Link a Device'
+              )
+            );
+
+            _origLog(
+              chalk.yellow(
+                '➡️ Choose "Link with phone number instead"'
+              )
+            );
           } catch (err) {
-            pairingRequested = false;
+            pairingRequested =
+              false;
 
             _origLog(
               chalk.red(
@@ -553,186 +1023,68 @@ async function connectToWhatsApp() {
         }
 
         // ──────────────────────────────────────────────────────
-        // CONNECTION CLOSED
-        // ──────────────────────────────────────────────────────
-
-        if (connection === 'close') {
-          activeConn = null;
-
-          const code =
-            lastDisconnect?.error?.output?.statusCode;
-
-          // ────────────────────────────────────────────────
-          // LOGGED OUT
-          // ────────────────────────────────────────────────
-
-          if (
-            code === DisconnectReason.loggedOut ||
-            code === 401
-          ) {
-            _origLog(
-              chalk.yellow(
-                '🔄 Session expired/logged out. Clearing and reconnecting...'
-              )
-            );
-
-            clearSession();
-
-            reconnectAttempts = 0;
-            initialConnection = true;
-
-            setTimeout(
-              () => connectToWhatsApp(),
-              3000
-            );
-
-          // ────────────────────────────────────────────────
-          // STREAM CONFLICT
-          // ────────────────────────────────────────────────
-
-          } else if (code === 440) {
-            reconnectAttempts++;
-
-            const wait440 =
-              reconnectAttempts <= 3
-                ? 60000
-                : Math.min(
-                    60000 *
-                      reconnectAttempts,
-                    300000
-                  );
-
-            _origLog(
-              chalk.yellow(
-                `⚡ Stream conflict (440). Attempt ${reconnectAttempts} — waiting ${Math.round(wait440 / 1000)}s...`
-              )
-            );
-
-            setTimeout(
-              () => connectToWhatsApp(),
-              wait440
-            );
-
-          // ────────────────────────────────────────────────
-          // TEMPORARY DISCONNECT
-          // ────────────────────────────────────────────────
-
-          } else if (
-            code === 408 ||
-            code === 503
-          ) {
-            reconnectAttempts++;
-
-            const delay =
-              Math.min(
-                5000 *
-                  Math.pow(
-                    1.5,
-                    reconnectAttempts
-                  ),
-                60000
-              );
-
-            _origLog(
-              chalk.yellow(
-                `🔌 Disconnected (${code}). Attempt ${reconnectAttempts} — retry in ${Math.round(delay / 1000)}s...`
-              )
-            );
-
-            setTimeout(
-              () => connectToWhatsApp(),
-              delay
-            );
-
-          // ────────────────────────────────────────────────
-          // GENERAL RECONNECT
-          // ────────────────────────────────────────────────
-
-          } else {
-            reconnectAttempts++;
-
-            const delay =
-              Math.min(
-                4000 *
-                  reconnectAttempts,
-                30000
-              );
-
-            _origLog(
-              chalk.yellow(
-                `🔌 Disconnected (${code}). Reconnecting in ${Math.round(delay / 1000)}s...`
-              )
-            );
-
-            setTimeout(
-              () => connectToWhatsApp(),
-              delay
-            );
-          }
-        }
-
-        // ──────────────────────────────────────────────────────
         // CONNECTION OPEN
         // ──────────────────────────────────────────────────────
 
-        if (connection === 'open') {
-          reconnectAttempts = 0;
+        if (
+          connection ===
+          'open'
+        ) {
+          reconnectAttempts =
+            0;
 
-          // Pairing is complete.
-          deletePairingNumber();
+          clearReconnectTimer();
 
-          if (initialConnection) {
-            initialConnection = false;
+          pairingRequested =
+            false;
 
-            const botNum =
-              conn.user?.id?.split(':')[0];
+          _origLog(
+            lime(
+              `\n✅ ${config.BOT_NAME} Connected!`
+            )
+          );
 
-            _origLog(
-              lime(
-                `\n✅ ${config.BOT_NAME} Connected!`
-              )
-            );
+          const botNum =
+            conn.user?.id
+              ?.split(':')[0];
 
-            _origLog(
-              '[SELFTEST] Attempting self-message send...'
-            );
+          _origLog(
+            lime(
+              `📱 Number : ${botNum || 'unknown'}`
+            )
+          );
 
-            _origLog(
-              lime(
-                `👑 Owner  : ${config.OWNER_NAME} (+${config.OWNER_NUMBER})`
-              )
-            );
+          _origLog(
+            lime(
+              `📶 Mode   : ${config.MODE}`
+            )
+          );
 
-            _origLog(
-              lime(
-                `📱 Number : ${botNum}`
-              )
-            );
+          _origLog(
+            lime(
+              `🔧 Prefix : ${config.PREFIX}\n`
+            )
+          );
 
-            _origLog(
-              lime(
-                `📶 Mode   : ${config.MODE}`
-              )
-            );
+          // ──────────────────────────────────────────────
+          // SELF MESSAGE
+          // ──────────────────────────────────────────────
 
-            _origLog(
-              lime(
-                `🔧 Prefix : ${config.PREFIX}\n`
-              )
-            );
-
-            // ──────────────────────────────────────────────
-            // SELF MESSAGE
-            // ──────────────────────────────────────────────
+          if (
+            initialConnection
+          ) {
+            initialConnection =
+              false;
 
             try {
-              const selfJid =
-                `${botNum}@s.whatsapp.net`;
+              if (botNum) {
+                const selfJid =
+                  `${botNum}@s.whatsapp.net`;
 
-              await conn.sendMessage(
-                selfJid,
-                {
-                  text:
+                await conn.sendMessage(
+                  selfJid,
+                  {
+                    text:
 `╔══════════════════════╗
 ║  *${config.BOT_NAME}* Online ✅  ║
 ╚══════════════════════╝
@@ -746,106 +1098,307 @@ async function connectToWhatsApp() {
   .format('HH:mm:ss DD/MM/YYYY')}
 
 _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
-                }
-              );
-
-            } catch (_) {}
-
-            // ──────────────────────────────────────────────
-            // RESOLVE OWNER LID
-            // ──────────────────────────────────────────────
-
-            try {
-              const ownerPhone =
-                config.OWNER_NUMBER +
-                '@s.whatsapp.net';
-
-              const results =
-                await conn.onWhatsApp(
-                  config.OWNER_NUMBER
-                );
-
-              const ownerInfo =
-                Array.isArray(results)
-                  ? results[0]
-                  : results;
-
-              if (
-                ownerInfo?.jid &&
-                ownerInfo.jid !== ownerPhone
-              ) {
-                lidMap.set(
-                  ownerInfo.jid,
-                  ownerPhone
-                );
-
-                lidMap.set(
-                  ownerPhone,
-                  ownerInfo.jid
-                );
-
-                _origLog(
-                  lime(
-                    `🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`
-                  )
+                  }
                 );
               }
-
-            } catch (_) {}
+            } catch {}
           }
+
+          // ──────────────────────────────────────────────
+          // RESOLVE OWNER LID
+          // ──────────────────────────────────────────────
+
+          try {
+            const results =
+              await conn.onWhatsApp(
+                config.OWNER_NUMBER
+              );
+
+            const ownerInfo =
+              Array.isArray(results)
+                ? results[0]
+                : results;
+
+            const ownerPhone =
+              `${config.OWNER_NUMBER}@s.whatsapp.net`;
+
+            if (
+              ownerInfo?.jid &&
+              ownerInfo.jid !==
+                ownerPhone
+            ) {
+              lidMap.set(
+                ownerInfo.jid,
+                ownerPhone
+              );
+
+              lidMap.set(
+                ownerPhone,
+                ownerInfo.jid
+              );
+
+              _origLog(
+                lime(
+                  `🔑 Owner LID resolved: ${ownerInfo.jid} → ${ownerPhone}`
+                )
+              );
+            }
+          } catch {}
+        }
+
+        // ──────────────────────────────────────────────────────
+        // CONNECTION CLOSED
+        // ──────────────────────────────────────────────────────
+
+        if (
+          connection ===
+          'close'
+        ) {
+          /*
+           * Do NOT allow this old socket to remain active.
+           */
+          if (
+            activeConn ===
+            conn
+          ) {
+            activeConn =
+              null;
+          }
+
+          /*
+           * Ignore a close event generated by an old socket.
+           */
+          if (
+            generation !==
+            socketGeneration
+          ) {
+            return;
+          }
+
+          const code =
+            lastDisconnect
+              ?.error
+              ?.output
+              ?.statusCode;
+
+          const errorMessage =
+            lastDisconnect
+              ?.error
+              ?.message ||
+            'unknown';
+
+          _origLog(
+            chalk.yellow(
+              `🔌 Connection closed. Code: ${code}, reason: ${errorMessage}`
+            )
+          );
+
+          // ════════════════════════════════════════════════════
+          // 401 / LOGGED OUT
+          // ════════════════════════════════════════════════════
+
+          if (
+            code ===
+              DisconnectReason.loggedOut ||
+            code === 401
+          ) {
+            /*
+             * ONLY HERE do we delete authentication.
+             */
+            _origLog(
+              chalk.red(
+                '🚪 WhatsApp session was genuinely logged out.'
+              )
+            );
+
+            await clearMongoSession();
+
+            reconnectAttempts =
+              0;
+
+            initialConnection =
+              true;
+
+            /*
+             * Give the old socket time to disappear.
+             */
+            setTimeout(
+              () =>
+                connectToWhatsApp(),
+              3000
+            );
+
+            return;
+          }
+
+          // ════════════════════════════════════════════════════
+          // 440 CONNECTION REPLACED
+          // ════════════════════════════════════════════════════
+
+          if (
+            code === 440 ||
+            code ===
+              DisconnectReason.connectionReplaced
+          ) {
+            /*
+             * DO NOT automatically create another socket.
+             *
+             * 440 means another WhatsApp connection has
+             * replaced this one.
+             */
+            _origLog(
+              chalk.red(
+                '⚠️ Connection replaced (440). Automatic reconnect stopped to prevent a socket loop.'
+              )
+            );
+
+            _origLog(
+              chalk.yellow(
+                '⚠️ Check BeraHost for another running instance of this bot.'
+              )
+            );
+
+            return;
+          }
+
+          // ════════════════════════════════════════════════════
+          // 408 TIMEOUT
+          // ════════════════════════════════════════════════════
+
+          if (
+            code === 408 ||
+            code ===
+              DisconnectReason.timedOut
+          ) {
+            /*
+             * CRITICAL:
+             *
+             * 408 does NOT mean the WhatsApp session
+             * has expired.
+             *
+             * DO NOT delete MongoDB authentication.
+             */
+            scheduleReconnect(
+              '408 timeout'
+            );
+
+            return;
+          }
+
+          // ════════════════════════════════════════════════════
+          // 503 / CONNECTION LOST
+          // ════════════════════════════════════════════════════
+
+          if (
+            code === 503 ||
+            code ===
+              DisconnectReason.unavailableService
+          ) {
+            scheduleReconnect(
+              '503 service unavailable'
+            );
+
+            return;
+          }
+
+          // ════════════════════════════════════════════════════
+          // RESTART REQUIRED
+          // ════════════════════════════════════════════════════
+
+          if (
+            code === 515 ||
+            code ===
+              DisconnectReason.restartRequired
+          ) {
+            _origLog(
+              chalk.yellow(
+                '🔄 WhatsApp requested a socket restart.'
+              )
+            );
+
+            scheduleReconnect(
+              'restart required'
+            );
+
+            return;
+          }
+
+          // ════════════════════════════════════════════════════
+          // GENERAL DISCONNECT
+          // ════════════════════════════════════════════════════
+
+          scheduleReconnect(
+            `disconnect ${code}`
+          );
         }
       }
     );
 
-    // ─── Save credentials ───
+    // ══════════════════════════════════════════════════════════
+    // SAVE AUTH CREDENTIALS
+    // ══════════════════════════════════════════════════════════
+
     conn.ev.on(
       'creds.update',
-      saveCreds
+      async () => {
+        try {
+          await saveCreds();
+        } catch (err) {
+          _origLog(
+            chalk.red(
+              `❌ MongoDB credential save failed: ${err.message}`
+            )
+          );
+        }
+      }
     );
 
     // ══════════════════════════════════════════════════════════
     // LID MAP
     // ══════════════════════════════════════════════════════════
 
-    const updateLidMap = (items) => {
-      for (
-        const c of (
-          Array.isArray(items)
-            ? items
-            : Object.values(items)
-        )
-      ) {
-        const lid =
-          c.lid ||
-          c.lidJid;
-
-        const id =
-          c.id ||
-          c.jid;
-
-        if (
-          lid &&
-          id &&
-          !id.endsWith('@lid')
+    const updateLidMap =
+      (items) => {
+        for (
+          const c of (
+            Array.isArray(items)
+              ? items
+              : Object.values(
+                  items || {}
+                )
+          )
         ) {
-          lidMap.set(
-            lid,
-            id
-          );
-        }
+          const lid =
+            c.lid ||
+            c.lidJid;
 
-        if (
-          c.id &&
-          !c.id.endsWith('@lid') &&
-          c.lidJid
-        ) {
-          lidMap.set(
-            c.lidJid,
-            c.id
-          );
+          const id =
+            c.id ||
+            c.jid;
+
+          if (
+            lid &&
+            id &&
+            !id.endsWith('@lid')
+          ) {
+            lidMap.set(
+              lid,
+              id
+            );
+          }
+
+          if (
+            c.id &&
+            !c.id.endsWith('@lid') &&
+            c.lidJid
+          ) {
+            lidMap.set(
+              c.lidJid,
+              c.id
+            );
+          }
         }
-      }
-    };
+      };
 
     conn.ev.on(
       'contacts.upsert',
@@ -872,7 +1425,8 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
       () =>
         updateLidMap(
           Object.values(
-            store.contacts || {}
+            store.contacts ||
+              {}
           )
         )
     );
@@ -881,21 +1435,12 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
     // MESSAGES
     // ══════════════════════════════════════════════════════════
 
-    // ─── ALL events diagnostic ───
-    conn.ev.process(
-      async (events) => {
-        const evKeys =
-          Object.keys(events);
-      }
-    );
-
     conn.ev.on(
       'messages.upsert',
       async ({
         messages,
-        type
+        type,
       }) => {
-
         _origLog(
           '[MSG_IN] messages.upsert fired — type:',
           type,
@@ -904,17 +1449,22 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
         );
 
         const isInteractiveResponse =
-          (msg) => !!(
-            msg.message?.interactiveResponseMessage ||
-            msg.message?.viewOnceMessage?.message?.interactiveResponseMessage ||
-            msg.message?.buttonsResponseMessage ||
-            msg.message?.listResponseMessage ||
-            msg.message?.templateButtonReplyMessage
-          );
+          (msg) =>
+            !!(
+              msg.message
+                ?.interactiveResponseMessage ||
+              msg.message
+                ?.viewOnceMessage
+                ?.message
+                ?.interactiveResponseMessage ||
+              msg.message
+                ?.buttonsResponseMessage ||
+              msg.message
+                ?.listResponseMessage ||
+              msg.message
+                ?.templateButtonReplyMessage
+            );
 
-        // 'notify' = normal incoming messages
-        // 'append' = group @lid / multi-device
-        // MUST be processed too
         if (
           type !== 'notify' &&
           type !== 'append' &&
@@ -928,48 +1478,51 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
         for (
           let msg of messages
         ) {
-
-          // Skip bot's own outgoing append messages
           if (
             msg.key?.fromMe &&
             type === 'append' &&
-            !isInteractiveResponse(msg)
+            !isInteractiveResponse(
+              msg
+            )
           ) {
             continue;
           }
 
           try {
-
-            // ──────────────────────────────────────────────
-            // Resolve @lid JIDs
-            // ──────────────────────────────────────────────
-
             const tryResolveLid =
               (lid) => {
-
                 if (
                   !lid ||
-                  !lid.endsWith('@lid')
+                  !lid.endsWith(
+                    '@lid'
+                  )
                 ) {
                   return lid;
                 }
 
                 let resolved =
-                  lidMap.get(lid);
+                  lidMap.get(
+                    lid
+                  );
 
-                if (!resolved) {
+                if (
+                  !resolved
+                ) {
                   const match =
                     Object.values(
-                      store?.contacts || {}
+                      store.contacts ||
+                        {}
                     ).find(
-                      c =>
+                      (c) =>
                         (
                           c.lid ||
                           c.lidJid
                         ) === lid
                     );
 
-                  if (match?.id) {
+                  if (
+                    match?.id
+                  ) {
                     resolved =
                       match.id;
 
@@ -982,7 +1535,9 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
 
                 return (
                   resolved &&
-                  !resolved.endsWith('@lid')
+                  !resolved.endsWith(
+                    '@lid'
+                  )
                 )
                   ? resolved
                   : lid;
@@ -1007,8 +1562,8 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                   key: {
                     ...msg.key,
                     remoteJid:
-                      resolved
-                  }
+                      resolved,
+                  },
                 };
               }
             }
@@ -1032,27 +1587,23 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                   key: {
                     ...msg.key,
                     participant:
-                      resolved
-                  }
+                      resolved,
+                  },
                 };
               }
             }
 
-            // ──────────────────────────────────────────────
             // STATUS
-            // ──────────────────────────────────────────────
-
             if (
               msg.key?.remoteJid ===
               'status@broadcast'
             ) {
-
               if (
                 config.AUTO_STATUS_SEEN
               ) {
                 await conn
                   .readMessages([
-                    msg.key
+                    msg.key,
                   ])
                   .catch(() => {});
               }
@@ -1068,7 +1619,7 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                   '👏',
                   '✨',
                   '🌟',
-                  '🎉'
+                  '🎉',
                 ];
 
                 await conn
@@ -1080,16 +1631,18 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                           emojis[
                             Math.floor(
                               Math.random() *
-                              emojis.length
+                                emojis.length
                             )
                           ],
-                        key: msg.key
-                      }
+                        key:
+                          msg.key,
+                      },
                     },
                     {
                       statusJidList: [
-                        msg.key.participant
-                      ]
+                        msg.key
+                          .participant,
+                      ],
                     }
                   )
                   .catch(() => {});
@@ -1101,10 +1654,11 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               ) {
                 await conn
                   .sendMessage(
-                    msg.key.participant,
+                    msg.key
+                      .participant,
                     {
                       text:
-                        config.STATUS_READ_MSG
+                        config.STATUS_READ_MSG,
                     }
                   )
                   .catch(() => {});
@@ -1113,12 +1667,10 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               continue;
             }
 
-            // ──────────────────────────────────────────────
-            // STORE MESSAGES
-            // ──────────────────────────────────────────────
-
-            if (msg.message) {
-
+            // STORE MESSAGE
+            if (
+              msg.message
+            ) {
               messageStore.set(
                 `${msg.key.remoteJid}:${msg.key.id}`,
                 msg.message
@@ -1132,13 +1684,14 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                   msg.key.id,
                   {
                     msg,
-                    ts: Date.now()
+                    ts: Date.now(),
                   }
                 );
               }
 
               if (
-                messageStore.size > 600
+                messageStore.size >
+                600
               ) {
                 messageStore.delete(
                   messageStore
@@ -1149,30 +1702,23 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               }
             }
 
-            // ──────────────────────────────────────────────
             // AUTO READ
-            // ──────────────────────────────────────────────
-
             if (
               config.AUTO_READ
             ) {
               await conn
                 .readMessages([
-                  msg.key
+                  msg.key,
                 ])
                 .catch(() => {});
             }
 
-            // ──────────────────────────────────────────────
-            // PROCESS MESSAGE
-            // ──────────────────────────────────────────────
-
+            // HANDLER
             await Handler(
               conn,
               msg,
               ALL_PLUGINS
             );
-
           } catch (err) {
             _origLog(
               chalk.red(
@@ -1186,14 +1732,15 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
     );
 
     // ══════════════════════════════════════════════════════════
-    // ANTI-DELETE
+    // ANTI DELETE
     // ══════════════════════════════════════════════════════════
 
     conn.ev.on(
       'messages.delete',
       async (item) => {
-
-        if (!config.ANTI_DELETE) {
+        if (
+          !config.ANTI_DELETE
+        ) {
           return;
         }
 
@@ -1204,7 +1751,6 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           for (
             const key of keys
           ) {
-
             const stored =
               messageStore.get(
                 key.id
@@ -1215,7 +1761,7 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
             }
 
             const {
-              msg
+              msg,
             } = stored;
 
             const msgType =
@@ -1224,7 +1770,8 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               );
 
             const target =
-              config.DELETE_PATH === 'pm'
+              config.DELETE_PATH ===
+              'pm'
                 ? `${config.OWNER_NUMBER}@s.whatsapp.net`
                 : msg.key.remoteJid;
 
@@ -1232,14 +1779,11 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               key.participant ||
               msg.key.remoteJid;
 
-            // ──────────────────────────────────────────────
-            // ALERT
-            // ──────────────────────────────────────────────
-
-            await conn.sendMessage(
-              target,
-              {
-                text:
+            await conn
+              .sendMessage(
+                target,
+                {
+                  text:
 `🗑️ *Anti-Delete Alert!*
 
 👤 *From:* @${deleter.split('@')[0]}
@@ -1248,16 +1792,12 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
 🕒 *Time:* ${moment()
   .tz('Africa/Nairobi')
   .format('HH:mm:ss')}`,
-
-                mentions: [
-                  deleter
-                ],
-              }
-            ).catch(() => {});
-
-            // ──────────────────────────────────────────────
-            // TEXT
-            // ──────────────────────────────────────────────
+                  mentions: [
+                    deleter,
+                  ],
+                }
+              )
+              .catch(() => {});
 
             if (
               msgType ===
@@ -1265,7 +1805,6 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               msgType ===
                 'extendedTextMessage'
             ) {
-
               const text =
                 msg.message
                   ?.conversation ||
@@ -1279,21 +1818,15 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                     target,
                     {
                       text:
-                        `📝 *Deleted Message:*\n${text}`
+                        `📝 *Deleted Message:*\n${text}`,
                     }
                   )
                   .catch(() => {});
               }
-
-            // ──────────────────────────────────────────────
-            // IMAGE
-            // ──────────────────────────────────────────────
-
             } else if (
               msgType ===
               'imageMessage'
             ) {
-
               try {
                 const buf =
                   await downloadMediaMessage(
@@ -1307,21 +1840,14 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                   {
                     image: buf,
                     caption:
-                      '📸 *Deleted Image*'
+                      '📸 *Deleted Image*',
                   }
                 );
-
               } catch {}
-
-            // ──────────────────────────────────────────────
-            // VIDEO
-            // ──────────────────────────────────────────────
-
             } else if (
               msgType ===
               'videoMessage'
             ) {
-
               try {
                 const buf =
                   await downloadMediaMessage(
@@ -1335,10 +1861,9 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
                   {
                     video: buf,
                     caption:
-                      '🎬 *Deleted Video*'
+                      '🎬 *Deleted Video*',
                   }
                 );
-
               } catch {}
             }
 
@@ -1346,7 +1871,6 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               key.id
             );
           }
-
         } catch (err) {
           _origLog(
             '[ANTIDELETE ERROR]',
@@ -1386,31 +1910,37 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
     );
 
   } catch (err) {
+    isConnecting =
+      false;
 
-    isConnecting = false;
+    if (
+      activeConn &&
+      activeConn !==
+        null
+    ) {
+      return;
+    }
 
     _origLog(
       chalk.red(
         '[CONNECT ERROR]'
       ),
-      err?.message
+      err?.stack ||
+        err?.message ||
+        err
     );
 
-    reconnectAttempts++;
-
-    setTimeout(
-      () => connectToWhatsApp(),
-      Math.min(
-        4000 *
-          reconnectAttempts,
-        30000
-      )
+    scheduleReconnect(
+      'connection error'
     );
+  } finally {
+    isConnecting =
+      false;
   }
 }
 
 // ══════════════════════════════════════════════════════════════
-// KEEP-ALIVE SERVER
+// KEEP ALIVE
 // ══════════════════════════════════════════════════════════════
 
 app.get(
@@ -1418,14 +1948,18 @@ app.get(
   (req, res) =>
     res.json({
       status: 'online',
-      bot: config.BOT_NAME,
-      owner: config.OWNER_NAME,
+      bot:
+        config.BOT_NAME,
+      owner:
+        config.OWNER_NAME,
       uptime:
         Math.floor(
           process.uptime()
         ) + 's',
-      prefix: config.PREFIX,
-      mode: config.MODE,
+      prefix:
+        config.PREFIX,
+      mode:
+        config.MODE,
       time:
         moment()
           .tz('Africa/Nairobi')
@@ -1446,10 +1980,9 @@ app.listen(
 );
 
 // ══════════════════════════════════════════════════════════════
-// GLOBAL SINGLETON INTERVALS
+// ALWAYS ONLINE
 // ══════════════════════════════════════════════════════════════
 
-// Always-online presence — 60s
 setInterval(
   () => {
     if (
@@ -1466,7 +1999,10 @@ setInterval(
   60000
 );
 
-// ─── Heartbeat ───
+// ══════════════════════════════════════════════════════════════
+// HEARTBEAT
+// ══════════════════════════════════════════════════════════════
+
 setInterval(
   () => {
     const up =
@@ -1502,23 +2038,93 @@ setInterval(
 );
 
 // ══════════════════════════════════════════════════════════════
+// GRACEFUL SHUTDOWN
+// ══════════════════════════════════════════════════════════════
+
+async function shutdown(
+  signal
+) {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown =
+    true;
+
+  _origLog(
+    chalk.yellow(
+      `\n🛑 ${signal} received. Shutting down...`
+    )
+  );
+
+  clearReconnectTimer();
+
+  try {
+    if (
+      activeConn
+    ) {
+      try {
+        activeConn.end(
+          undefined
+        );
+      } catch {}
+    }
+  } catch {}
+
+  try {
+    if (
+      mongoClient
+    ) {
+      await mongoClient.close();
+    }
+  } catch {}
+
+  process.exit(0);
+}
+
+process.once(
+  'SIGTERM',
+  () =>
+    shutdown('SIGTERM')
+);
+
+process.once(
+  'SIGINT',
+  () =>
+    shutdown('SIGINT')
+);
+
+// ══════════════════════════════════════════════════════════════
 // START
 // ══════════════════════════════════════════════════════════════
 
-// Ensure yt-dlp binary exists before connecting
-ensureYtDlp()
-  .then(
-    () =>
-      connectToWhatsApp()
-  )
-  .catch(
-    (err) => {
-      _origLog(
-        chalk.yellow(
-          `⚠️ yt-dlp unavailable: ${err.message} — download commands may be limited`
-        )
-      );
+async function start() {
+  try {
+    await connectMongo();
 
-      connectToWhatsApp();
+    await ensureYtDlp();
+
+    await connectToWhatsApp();
+  } catch (err) {
+    _origLog(
+      chalk.yellow(
+        `⚠️ Startup warning: ${err.message}`
+      )
+    );
+
+    if (
+      String(
+        err?.message
+      ).toLowerCase()
+        .includes('ytdlp')
+    ) {
+      await connectToWhatsApp();
+    } else {
+      scheduleReconnect(
+        'startup failure'
+      );
     }
-  );
+  }
+}
+
+start();
