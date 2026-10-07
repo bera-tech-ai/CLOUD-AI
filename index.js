@@ -81,16 +81,9 @@ const app = express();
 const PORT =
   parseInt(process.env.PORT || '3000', 10);
 
-/*
- * CHANGE THIS VALUE.
- *
- * Do NOT use the MongoDB password you pasted into chat.
- * Rotate that password in MongoDB Atlas first.
- */
 const MONGODB_URI =
   process.env.MONGODB_URI ||
-  'mongodb+srv://ellyongiro8:QwXDXE6tyrGpUTNb@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-';
+  'mongodb+srv://ellyongiro8:QwXDXE6tyrGpUTNb@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 
 const MONGODB_DB =
   process.env.MONGODB_DB ||
@@ -106,7 +99,6 @@ const SESSION_ID =
 
 const lime =
   chalk.bold.hex('#32CD32');
-
 const orange =
   chalk.bold.hex('#FFA500');
 
