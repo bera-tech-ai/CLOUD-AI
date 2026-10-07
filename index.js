@@ -116,9 +116,13 @@ const messageStore =
 // ─────────────────────────────────────────────────────────────
 // MONGODB CONFIGURATION
 // ─────────────────────────────────────────────────────────────
+//
+// IMPORTANT:
+// Put your NEW/ROTATED MongoDB password in this URI.
+// Do not reuse the password previously exposed in chat.
 
 const MONGODB_URI =
-  'mongodb+srv://ellyongiro8:QwXDXE6tyrGpUTNb@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+  'mongodb+srv://ellyongiro8:REPLACE_WITH_YOUR_ROTATED_PASSWORD@cluster0.tyxcmm9.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
 
 const MONGODB_DB =
   'cloud_ai';
@@ -126,7 +130,13 @@ const MONGODB_DB =
 const MONGODB_COLLECTION =
   'baileys_auth';
 
-const SESSION_ID =
+const MONGODB_SESSIONS_COLLECTION =
+  'baileys_sessions';
+
+// Legacy ID used by your previous implementation.
+// It is only used for migration of an existing registered
+// session. New sessions NEVER use this ID.
+const LEGACY_SESSION_ID =
   'cloud-ai-main';
 
 let mongoClient = null;
@@ -135,7 +145,14 @@ let mongoDb = null;
 
 let mongoCollection = null;
 
+let mongoSessionsCollection = null;
+
 let mongoConnecting = null;
+
+// The session currently owned by the active socket.
+let currentSessionId = null;
+
+let currentSessionStatus = null;
 
 
 // ─────────────────────────────────────────────────────────────
@@ -337,7 +354,7 @@ _origLog(
 
 
 // ══════════════════════════════════════════════════════════════
-// MONGODB BAILEYS AUTH STATE
+// MONGODB VALUE SERIALIZATION
 // ══════════════════════════════════════════════════════════════
 
 function serializeMongoValue(value) {
@@ -430,12 +447,16 @@ function deserializeMongoValue(value) {
 }
 
 
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 // CONNECT MONGODB
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 
 async function connectMongo() {
-  if (mongoDb) {
+  if (
+    mongoDb &&
+    mongoCollection &&
+    mongoSessionsCollection
+  ) {
     return mongoDb;
   }
 
@@ -485,6 +506,11 @@ async function connectMongo() {
           MONGODB_COLLECTION
         );
 
+      mongoSessionsCollection =
+        mongoDb.collection(
+          MONGODB_SESSIONS_COLLECTION
+        );
+
       await mongoCollection.createIndex(
         {
           sessionId: 1,
@@ -493,6 +519,23 @@ async function connectMongo() {
         },
         {
           unique: true,
+        }
+      );
+
+      await mongoSessionsCollection.createIndex(
+        {
+          sessionId: 1,
+        },
+        {
+          unique: true,
+        }
+      );
+
+      await mongoSessionsCollection.createIndex(
+        {
+          status: 1,
+          registered: 1,
+          updatedAt: -1,
         }
       );
 
@@ -510,13 +553,13 @@ async function connectMongo() {
 
       _origLog(
         chalk.gray(
-          `📁 Collection: ${MONGODB_COLLECTION}`
+          `📁 Auth collection: ${MONGODB_COLLECTION}`
         )
       );
 
       _origLog(
         chalk.gray(
-          `🔑 Session: ${SESSION_ID}`
+          `📁 Session registry: ${MONGODB_SESSIONS_COLLECTION}`
         )
       );
 
@@ -532,9 +575,440 @@ async function connectMongo() {
 }
 
 
+// ══════════════════════════════════════════════════════════════
+// SESSION REGISTRY
+// ══════════════════════════════════════════════════════════════
+
+function generateSessionId() {
+  const timestamp =
+    Date.now().toString(36);
+
+  const random =
+    Math.random()
+      .toString(36)
+      .slice(2, 10);
+
+  return `cloud-ai-${timestamp}-${random}`;
+}
+
+
+async function createNewSession() {
+  await connectMongo();
+
+  const sessionId =
+    generateSessionId();
+
+  const now =
+    new Date();
+
+  await mongoSessionsCollection.insertOne({
+    sessionId,
+
+    status:
+      'pending',
+
+    registered:
+      false,
+
+    createdAt:
+      now,
+
+    updatedAt:
+      now,
+
+    lastReason:
+      'new pairing session',
+  });
+
+  currentSessionId =
+    sessionId;
+
+  currentSessionStatus =
+    'pending';
+
+  _origLog(
+    chalk.cyan(
+      `🆕 Created new WhatsApp session: ${sessionId}`
+    )
+  );
+
+  return sessionId;
+}
+
+
+async function updateSessionRegistry(
+  sessionId,
+  updates = {}
+) {
+  if (!sessionId) {
+    return;
+  }
+
+  await connectMongo();
+
+  await mongoSessionsCollection.updateOne(
+    {
+      sessionId,
+    },
+    {
+      $set: {
+        ...updates,
+        updatedAt:
+          new Date(),
+      },
+      $setOnInsert: {
+        sessionId,
+        createdAt:
+          new Date(),
+      },
+    },
+    {
+      upsert: true,
+    }
+  );
+
+  if (
+    sessionId === currentSessionId &&
+    updates.status
+  ) {
+    currentSessionStatus =
+      updates.status;
+  }
+}
+
+
+async function markSessionPending(
+  sessionId,
+  reason = 'waiting for pairing'
+) {
+  await updateSessionRegistry(
+    sessionId,
+    {
+      status:
+        'pending',
+
+      registered:
+        false,
+
+      lastReason:
+        reason,
+    }
+  );
+}
+
+
+async function markSessionActive(
+  sessionId,
+  phone = null
+) {
+  await updateSessionRegistry(
+    sessionId,
+    {
+      status:
+        'active',
+
+      registered:
+        true,
+
+      phone:
+        phone || undefined,
+
+      lastReason:
+        'WhatsApp connected',
+    }
+  );
+}
+
+
+async function markSessionFailed(
+  sessionId,
+  reason
+) {
+  await updateSessionRegistry(
+    sessionId,
+    {
+      status:
+        'failed',
+
+      registered:
+        false,
+
+      lastReason:
+        reason || 'pairing session failed',
+    }
+  );
+}
+
+
+async function markSessionLoggedOut(
+  sessionId
+) {
+  await updateSessionRegistry(
+    sessionId,
+    {
+      status:
+        'logged_out',
+
+      registered:
+        false,
+
+      lastReason:
+        'WhatsApp logged out',
+    }
+  );
+}
+
+
+async function findRegisteredSession() {
+  await connectMongo();
+
+  const sessions =
+    await mongoSessionsCollection
+      .find({
+        status:
+          'active',
+
+        registered:
+          true,
+      })
+      .sort({
+        updatedAt:
+          -1,
+      })
+      .limit(10)
+      .toArray();
+
+  for (
+    const session of sessions
+  ) {
+
+    const credsDocument =
+      await mongoCollection.findOne({
+        sessionId:
+          session.sessionId,
+
+        type:
+          'creds',
+      });
+
+    if (
+      !credsDocument?.data
+    ) {
+      await markSessionFailed(
+        session.sessionId,
+        'active registry entry has no credentials'
+      );
+
+      continue;
+    }
+
+    try {
+
+      const creds =
+        deserializeMongoValue(
+          credsDocument.data
+        );
+
+      if (
+        creds?.registered
+      ) {
+
+        _origLog(
+          lime(
+            `♻️ Restoring active WhatsApp session: ${session.sessionId}`
+          )
+        );
+
+        return session.sessionId;
+      }
+
+      await markSessionFailed(
+        session.sessionId,
+        'credentials are not registered'
+      );
+
+    } catch (err) {
+
+      await markSessionFailed(
+        session.sessionId,
+        `invalid stored credentials: ${err.message}`
+      );
+    }
+  }
+
+  return null;
+}
+
+
 // ─────────────────────────────────────────────────────────────
-// MONGODB AUTH STATE
+// LEGACY SESSION MIGRATION
 // ─────────────────────────────────────────────────────────────
+
+async function migrateLegacySessionIfNeeded() {
+  await connectMongo();
+
+  const existingLegacy =
+    await mongoCollection.findOne({
+      sessionId:
+        LEGACY_SESSION_ID,
+
+      type:
+        'creds',
+    });
+
+  if (
+    !existingLegacy?.data
+  ) {
+    return null;
+  }
+
+  try {
+
+    const creds =
+      deserializeMongoValue(
+        existingLegacy.data
+      );
+
+    if (
+      !creds?.registered
+    ) {
+
+      _origLog(
+        chalk.yellow(
+          '⚠️ Legacy cloud-ai-main exists but is not registered. It will not be reused.'
+        )
+      );
+
+      return null;
+    }
+
+    const alreadyMigrated =
+      await mongoSessionsCollection.findOne({
+        sessionId:
+          LEGACY_SESSION_ID,
+      });
+
+    if (
+      alreadyMigrated
+    ) {
+
+      if (
+        alreadyMigrated.status ===
+          'active' &&
+        alreadyMigrated.registered
+      ) {
+        return LEGACY_SESSION_ID;
+      }
+
+      return null;
+    }
+
+    await mongoSessionsCollection.insertOne({
+      sessionId:
+        LEGACY_SESSION_ID,
+
+      status:
+        'active',
+
+      registered:
+        true,
+
+      phone:
+        creds.me?.id ||
+        null,
+
+      createdAt:
+        new Date(),
+
+      updatedAt:
+        new Date(),
+
+      lastReason:
+        'migrated from previous CLOUD AI session architecture',
+    });
+
+    _origLog(
+      chalk.cyan(
+        '♻️ Migrated existing registered cloud-ai-main session.'
+      )
+    );
+
+    return LEGACY_SESSION_ID;
+
+  } catch (err) {
+
+    _origLog(
+      chalk.red(
+        `❌ Legacy session migration failed: ${err.message}`
+      )
+    );
+
+    return null;
+  }
+}
+
+
+async function getSessionForStartup() {
+  await connectMongo();
+
+  // First use an already registered active session.
+  let sessionId =
+    await findRegisteredSession();
+
+  if (sessionId) {
+    currentSessionId =
+      sessionId;
+
+    currentSessionStatus =
+      'active';
+
+    return sessionId;
+  }
+
+  // Then attempt one-time migration of the old fixed session.
+  sessionId =
+    await migrateLegacySessionIfNeeded();
+
+  if (sessionId) {
+    currentSessionId =
+      sessionId;
+
+    currentSessionStatus =
+      'active';
+
+    return sessionId;
+  }
+
+  // Retire any abandoned pending sessions.
+  await mongoSessionsCollection.updateMany(
+    {
+      status:
+        'pending',
+    },
+    {
+      $set: {
+        status:
+          'failed',
+
+        registered:
+          false,
+
+        lastReason:
+          'abandoned pending session replaced by new startup session',
+
+        updatedAt:
+          new Date(),
+      },
+    }
+  );
+
+  return await createNewSession();
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// MONGODB BAILEYS AUTH STATE
+// ══════════════════════════════════════════════════════════════
 
 async function useMongoAuthState(
   sessionId
@@ -555,17 +1029,20 @@ async function useMongoAuthState(
     credsDocument &&
     credsDocument.data
   ) {
+
     creds =
       deserializeMongoValue(
         credsDocument.data
       );
+
   } else {
+
     creds =
       initAuthCreds();
 
     _origLog(
       chalk.yellow(
-        '🆕 No existing WhatsApp credentials found in MongoDB.'
+        `🆕 No existing WhatsApp credentials found for session ${sessionId}.`
       )
     );
   }
@@ -601,6 +1078,7 @@ async function useMongoAuthState(
       for (
         const id of ids
       ) {
+
         const document =
           documents.find(
             item =>
@@ -611,6 +1089,7 @@ async function useMongoAuthState(
           document &&
           document.data !== undefined
         ) {
+
           result[id] =
             deserializeMongoValue(
               document.data
@@ -632,6 +1111,7 @@ async function useMongoAuthState(
         ]
         of Object.entries(data)
       ) {
+
         for (
           const [
             id,
@@ -656,7 +1136,8 @@ async function useMongoAuthState(
                   sessionId,
                   type:
                     documentType,
-                  key: id,
+                  key:
+                    id,
                 },
               },
             });
@@ -669,28 +1150,34 @@ async function useMongoAuthState(
                   sessionId,
                   type:
                     documentType,
-                  key: id,
+                  key:
+                    id,
                 },
 
                 update: {
                   $set: {
                     sessionId,
+
                     type:
                       documentType,
-                    key: id,
+
+                    key:
+                      id,
+
                     data:
                       serializeMongoValue(
                         value
                       ),
+
                     updatedAt:
                       new Date(),
                   },
                 },
 
-                upsert: true,
+                upsert:
+                  true,
               },
             });
-
           }
         }
       }
@@ -698,10 +1185,12 @@ async function useMongoAuthState(
       if (
         operations.length
       ) {
+
         await mongoCollection.bulkWrite(
           operations,
           {
-            ordered: false,
+            ordered:
+              false,
           }
         );
       }
@@ -710,29 +1199,52 @@ async function useMongoAuthState(
 
 
   async function saveCreds() {
+
     await mongoCollection.updateOne(
       {
         sessionId,
-        type: 'creds',
+
+        type:
+          'creds',
       },
 
       {
         $set: {
           sessionId,
-          type: 'creds',
+
+          type:
+            'creds',
+
           data:
             serializeMongoValue(
               creds
             ),
+
           updatedAt:
             new Date(),
         },
       },
 
       {
-        upsert: true,
+        upsert:
+          true,
       }
     );
+
+
+    // Once Baileys reports registration,
+    // immediately promote this session.
+    if (
+      creds.registered &&
+      currentSessionId === sessionId
+    ) {
+
+      await markSessionActive(
+        sessionId,
+        creds.me?.id ||
+          null
+      );
+    }
   }
 
 
@@ -744,7 +1256,8 @@ async function useMongoAuthState(
         makeCacheableSignalKeyStore(
           keys,
           pino({
-            level: 'warn'
+            level:
+              'warn'
           })
         ),
     },
@@ -754,24 +1267,30 @@ async function useMongoAuthState(
 }
 
 
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 // CLEAR MONGODB SESSION
-// ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
 
-async function clearMongoSession() {
+async function clearMongoSession(
+  sessionId
+) {
   try {
+
     await connectMongo();
+
+    if (!sessionId) {
+      return;
+    }
 
     await mongoCollection.deleteMany(
       {
-        sessionId:
-          SESSION_ID,
+        sessionId,
       }
     );
 
     _origLog(
       chalk.yellow(
-        '🗑️ MongoDB WhatsApp session cleared.'
+        `🗑️ MongoDB WhatsApp authentication cleared for session: ${sessionId}`
       )
     );
 
@@ -805,6 +1324,7 @@ function savePairingNumber(
   number
 ) {
   try {
+
     const normalized =
       normalizePhoneNumber(
         number
@@ -837,6 +1357,7 @@ function savePairingNumber(
 
 function loadPairingNumber() {
   try {
+
     if (
       !fs.existsSync(
         phoneFile
@@ -863,6 +1384,7 @@ function loadPairingNumber() {
 
 function deletePairingNumber() {
   try {
+
     if (
       fs.existsSync(
         phoneFile
@@ -872,6 +1394,7 @@ function deletePairingNumber() {
         phoneFile
       );
     }
+
   } catch {}
 }
 
@@ -884,6 +1407,7 @@ async function askForPhoneNumber() {
         readline.createInterface({
           input:
             process.stdin,
+
           output:
             process.stdout,
         });
@@ -921,7 +1445,7 @@ async function askForPhoneNumber() {
 
 async function getPairingNumber() {
 
-  // 1. Previously saved number
+  // 1. Previously saved number.
   let number =
     loadPairingNumber();
 
@@ -929,7 +1453,7 @@ async function getPairingNumber() {
     return number;
   }
 
-  // 2. PAIRING_NUMBER
+  // 2. PAIRING_NUMBER.
   if (
     process.env.PAIRING_NUMBER
   ) {
@@ -940,6 +1464,7 @@ async function getPairingNumber() {
       );
 
     if (number) {
+
       savePairingNumber(
         number
       );
@@ -948,7 +1473,7 @@ async function getPairingNumber() {
     }
   }
 
-  // 3. OWNER_NUMBER
+  // 3. OWNER_NUMBER.
   if (
     config?.OWNER_NUMBER
   ) {
@@ -959,6 +1484,7 @@ async function getPairingNumber() {
       );
 
     if (number) {
+
       savePairingNumber(
         number
       );
@@ -967,7 +1493,7 @@ async function getPairingNumber() {
     }
   }
 
-  // 4. Terminal
+  // 4. Terminal.
   return await askForPhoneNumber();
 }
 
@@ -1050,7 +1576,9 @@ function scheduleReconnect(
         }
 
         try {
+
           await connectToWhatsApp();
+
         } catch (err) {
 
           _origLog(
@@ -1064,8 +1592,67 @@ function scheduleReconnect(
           );
         }
       },
+
       reconnectDelay
     );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// START A BRAND-NEW PAIRING SESSION
+// ─────────────────────────────────────────────────────────────
+
+async function startNewPairingSession(
+  reason
+) {
+  if (shuttingDown) {
+    return;
+  }
+
+  if (reconnectTimer) {
+    clearTimeout(
+      reconnectTimer
+    );
+
+    reconnectTimer =
+      null;
+  }
+
+  const oldSession =
+    currentSessionId;
+
+  if (
+    oldSession
+  ) {
+
+    await markSessionFailed(
+      oldSession,
+      reason
+    );
+  }
+
+  currentSessionId =
+    null;
+
+  currentSessionStatus =
+    null;
+
+  reconnectAttempts =
+    0;
+
+  pairingTimer =
+    null;
+
+  _origLog(
+    chalk.cyan(
+      `🆕 ${reason}`
+    )
+  );
+
+  scheduleReconnect(
+    'creating new pairing session',
+    2000
+  );
 }
 
 
@@ -1085,20 +1672,25 @@ async function closeSocket(
   } catch {}
 
   try {
+
     if (conn.ws) {
       conn.ws.close();
     }
+
   } catch {}
 
   try {
+
     if (
       typeof conn.end ===
       'function'
     ) {
+
       conn.end(
         undefined
       );
     }
+
   } catch {}
 
   await new Promise(
@@ -1129,7 +1721,8 @@ async function connectToWhatsApp() {
     return;
   }
 
-  isConnecting = true;
+  isConnecting =
+    true;
 
   const generation =
     ++socketGeneration;
@@ -1137,24 +1730,85 @@ async function connectToWhatsApp() {
   let pairingRequested =
     false;
 
+  let sessionId =
+    currentSessionId;
+
+  let state = null;
+
+  let saveCreds = null;
+
+  let wasRegisteredAtStart =
+    false;
+
+  let pairingNumber =
+    null;
+
   try {
 
     // ────────────────────────────────────────────────────────
-    // MongoDB
+    // SELECT SESSION
     // ────────────────────────────────────────────────────────
 
-    const {
+    if (!sessionId) {
+
+      sessionId =
+        await getSessionForStartup();
+
+    }
+
+    currentSessionId =
+      sessionId;
+
+
+    _origLog(
+      chalk.gray(
+        `🔑 Current MongoDB session: ${sessionId}`
+      )
+    );
+
+
+    // ────────────────────────────────────────────────────────
+    // MongoDB AUTH
+    // ────────────────────────────────────────────────────────
+
+    ({
       state,
       saveCreds
     } =
       await useMongoAuthState(
-        SESSION_ID
-      );
+        sessionId
+      ));
 
-    const wasRegisteredAtStart =
+
+    wasRegisteredAtStart =
       Boolean(
         state.creds.registered
       );
+
+
+    if (
+      wasRegisteredAtStart
+    ) {
+
+      await markSessionActive(
+        sessionId,
+        state.creds.me?.id ||
+          null
+      );
+
+      currentSessionStatus =
+        'active';
+
+    } else {
+
+      await markSessionPending(
+        sessionId,
+        'waiting for WhatsApp pairing'
+      );
+
+      currentSessionStatus =
+        'pending';
+    }
 
 
     // ────────────────────────────────────────────────────────
@@ -1177,9 +1831,6 @@ async function connectToWhatsApp() {
     // PAIRING NUMBER
     // ────────────────────────────────────────────────────────
 
-    let pairingNumber =
-      null;
-
     if (
       !state.creds.registered
     ) {
@@ -1188,6 +1839,7 @@ async function connectToWhatsApp() {
         await getPairingNumber();
 
       if (!pairingNumber) {
+
         throw new Error(
           'No phone number supplied for pairing.'
         );
@@ -1211,7 +1863,8 @@ async function connectToWhatsApp() {
 
         logger:
           pino({
-            level: 'warn'
+            level:
+              'warn'
           }),
 
         printQRInTerminal:
@@ -1222,7 +1875,8 @@ async function connectToWhatsApp() {
             'Chrome'
           ),
 
-        auth: state,
+        auth:
+          state,
 
         msgRetryCounterCache,
 
@@ -1278,6 +1932,7 @@ async function connectToWhatsApp() {
         ) {
 
           if (c.id) {
+
             store.contacts[
               c.id
             ] = c;
@@ -1305,6 +1960,7 @@ async function connectToWhatsApp() {
                   u.id
                 ] || {}
               ),
+
               ...u,
             };
           }
@@ -1353,12 +2009,8 @@ async function connectToWhatsApp() {
 
 
           /*
-           * Pairing code does not need to wait
-           * for a QR event.
-           *
-           * With printQRInTerminal:false,
-           * request the pairing code directly
-           * once the socket begins connecting.
+           * Pairing code is requested only for
+           * an unregistered CURRENT socket.
            */
 
           if (
@@ -1449,6 +2101,9 @@ async function connectToWhatsApp() {
             pairingTimer
           );
 
+          pairingTimer =
+            null;
+
           pairingRequested =
             false;
 
@@ -1461,9 +2116,25 @@ async function connectToWhatsApp() {
           deletePairingNumber();
 
 
+          // Make absolutely sure the current session
+          // is marked active only after WhatsApp opens.
+          await markSessionActive(
+            sessionId,
+            conn.user?.id ||
+              null
+          );
+
+
           _origLog(
             lime(
               `\n✅ ${config.BOT_NAME} Connected!`
+            )
+          );
+
+
+          _origLog(
+            lime(
+              `🔑 MongoDB session: ${sessionId}`
             )
           );
 
@@ -1612,6 +2283,7 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           if (
             activeConn === conn
           ) {
+
             activeConn =
               null;
           }
@@ -1638,26 +2310,25 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           }
 
 
-          // ────────────────────────────────────────────────
-          // 401 / LOGGED OUT
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
+          // 401
+          // ═══════════════════════════════════════════════════
+          //
+          // UNREGISTERED:
+          // The pairing attempt failed/died.
+          // DO NOT reuse the same auth session.
+          //
+          // REGISTERED:
+          // Genuine WhatsApp logout.
+          // Retire this session and create another.
+          // ═══════════════════════════════════════════════════
 
           if (
             code ===
               DisconnectReason.loggedOut ||
-            code === 401
+            code ===
+              401
           ) {
-
-            /*
-             * IMPORTANT:
-             *
-             * If the account was already registered,
-             * 401 means the WhatsApp session is logged out
-             * and MongoDB credentials must be removed.
-             *
-             * If the account was NOT registered yet,
-             * DO NOT delete MongoDB credentials.
-             */
 
             if (
               wasRegisteredAtStart ||
@@ -1666,11 +2337,17 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
 
               _origLog(
                 chalk.yellow(
-                  '🔐 Registered WhatsApp session logged out. Clearing MongoDB authentication...'
+                  '🔐 Registered WhatsApp session logged out.'
                 )
               );
 
-              await clearMongoSession();
+              await markSessionLoggedOut(
+                sessionId
+              );
+
+              await clearMongoSession(
+                sessionId
+              );
 
               reconnectAttempts =
                 0;
@@ -1678,8 +2355,17 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
               pairingRequested =
                 false;
 
+              currentSessionId =
+                null;
+
+              currentSessionStatus =
+                null;
+
+
+              // Do NOT reconnect this same session.
+              // A completely new MongoDB session is created.
               scheduleReconnect(
-                'logged out',
+                'logged out — creating new session',
                 3000
               );
 
@@ -1687,16 +2373,47 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
 
               _origLog(
                 chalk.yellow(
-                  '⚠️ Unregistered session disconnected. MongoDB authentication will NOT be cleared.'
+                  '⚠️ Unregistered pairing session failed.'
                 )
+              );
+
+              await markSessionFailed(
+                sessionId,
+                '401 during unregistered pairing'
               );
 
               pairingRequested =
                 false;
 
+
+              /*
+               * CRITICAL:
+               *
+               * The old session is now retired.
+               * We do NOT call scheduleReconnect()
+               * while currentSessionId still points to it.
+               */
+
+              currentSessionId =
+                null;
+
+              currentSessionStatus =
+                null;
+
+              reconnectAttempts =
+                0;
+
+
+              _origLog(
+                chalk.cyan(
+                  '🆕 Retired failed pairing session. Creating a brand-new session...'
+                )
+              );
+
+
               scheduleReconnect(
-                'unregistered pairing connection',
-                5000
+                'new pairing session',
+                2000
               );
             }
 
@@ -1704,12 +2421,13 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           }
 
 
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
           // 440 CONNECTION REPLACED
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
 
           if (
-            code === 440
+            code ===
+            440
           ) {
 
             reconnectAttempts++;
@@ -1738,15 +2456,22 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           }
 
 
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
           // TEMPORARY DISCONNECT
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
 
           if (
             code === 408 ||
             code === 503 ||
             code === 515
           ) {
+
+            /*
+             * IMPORTANT:
+             *
+             * Temporary disconnects MUST reuse
+             * the same session.
+             */
 
             scheduleReconnect(
               `temporary disconnect ${code}`
@@ -1756,9 +2481,9 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
           }
 
 
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
           // GENERAL DISCONNECT
-          // ────────────────────────────────────────────────
+          // ═══════════════════════════════════════════════════
 
           scheduleReconnect(
             `disconnect ${code ?? 'unknown'}`
@@ -2516,6 +3241,7 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
       generation ===
         socketGeneration
     ) {
+
       activeConn =
         null;
     }
@@ -2527,6 +3253,40 @@ _Type ${config.PREFIX}menu to see all commands_ 🌩️`,
       ),
       err?.message
     );
+
+
+    /*
+     * If startup failed before WhatsApp was registered,
+     * retire the pending session rather than endlessly
+     * reusing a broken authentication state.
+     */
+
+    if (
+      sessionId &&
+      !wasRegisteredAtStart
+    ) {
+
+      try {
+
+        await markSessionFailed(
+          sessionId,
+          `connection startup failed: ${err.message}`
+        );
+
+      } catch {}
+      
+      if (
+        currentSessionId ===
+        sessionId
+      ) {
+
+        currentSessionId =
+          null;
+
+        currentSessionStatus =
+          null;
+      }
+    }
 
 
     scheduleReconnect(
@@ -2573,6 +3333,14 @@ app.get(
         activeConn
           ? 'connected'
           : 'reconnecting',
+
+      session:
+        currentSessionId ||
+        null,
+
+      sessionStatus:
+        currentSessionStatus ||
+        null,
 
       time:
         moment()
@@ -2660,7 +3428,7 @@ setInterval(
 
     _origLog(
       lime(
-        `💓 ${h}h${m}m${s}s | ${st} | store:${messageStore.size}`
+        `💓 ${h}h${m}m${s}s | ${st} | session:${currentSessionId || 'none'} | status:${currentSessionStatus || 'none'} | store:${messageStore.size}`
       )
     );
 
@@ -2740,6 +3508,9 @@ async function shutdown(
       mongoCollection =
         null;
 
+      mongoSessionsCollection =
+        null;
+
       _origLog(
         chalk.green(
           '✅ MongoDB connection closed.'
@@ -2779,13 +3550,19 @@ _origLog(
 
 _origLog(
   chalk.cyan(
-    `📁 MongoDB collection : ${MONGODB_COLLECTION}`
+    `📁 MongoDB auth collection : ${MONGODB_COLLECTION}`
   )
 );
 
 _origLog(
   chalk.cyan(
-    `🔑 MongoDB session : ${SESSION_ID}`
+    `📁 MongoDB session registry : ${MONGODB_SESSIONS_COLLECTION}`
+  )
+);
+
+_origLog(
+  chalk.cyan(
+    '🔑 MongoDB session mode : UNIQUE PER PAIRING'
   )
 );
 
