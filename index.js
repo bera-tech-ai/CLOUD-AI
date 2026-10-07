@@ -1,306 +1,190 @@
-// ============================================================
-// CLOUD AI v3.2
-// MongoDB Persistent Baileys Authentication
-// Stable Single-Socket Connection Manager
-// ============================================================
-
 import 'dotenv/config'
 
 import http from 'http'
-import express from 'express'
-import pino from 'pino'
+import fs from 'fs'
+import path from 'path'
+import axios from 'axios'
 import chalk from 'chalk'
-import NodeCache from 'node-cache'
-import moment from 'moment-timezone'
+import pino from 'pino'
 import { MongoClient } from 'mongodb'
 
 import {
     makeWASocket,
-    DisconnectReason,
     fetchLatestBaileysVersion,
     makeCacheableSignalKeyStore,
+    DisconnectReason,
     jidNormalizedUser
 } from '@whiskeysockets/baileys'
 
-import { Boom } from '@hapi/boom'
-
-import { Handler, Callupdate } from './data/handler.js'
-import { lidMap } from './lib/Serializer.js'
-import { ensureYtDlp } from './lib/ytdlp.js'
-import config from './config.cjs'
-
-// ============================================================
-// PLUGINS
-// ============================================================
-
-import generalPlugin from './plugins/general.js'
-import aiPlugin from './plugins/ai.js'
-import imaginePlugin from './plugins/imagine.js'
-import animePlugin from './plugins/anime.js'
-import photoPlugin from './plugins/photo.js'
-import downloaderPlugin from './plugins/downloader.js'
-import converterPlugin from './plugins/converter.js'
-import toolsPlugin from './plugins/tools.js'
-import extraPlugin from './plugins/extra.js'
-import groupPlugin from './plugins/group.js'
-import ownerPlugin from './plugins/owner.js'
-import searchPlugin from './plugins/search.js'
-import gamesPlugin from './plugins/games.js'
-import settingsPlugin from './plugins/settings.js'
-import techPlugin from './plugins/tech.js'
-import funPlugin from './plugins/fun.js'
-import infoPlugin from './plugins/info.js'
-import beraPlugin from './plugins/bera.js'
-import btnmenuPlugin from './plugins/btnmenu.js'
-import dbaPlugin from './plugins/dba.js'
-
-import { onGroupUpdate } from './plugins/welcome.js'
-import { handleCall } from './plugins/anticall.js'
+import {
+    handleMessage,
+    handleGroupEvents,
+    handleAntiDelete,
+    handleAntiEdit
+} from './Handler.js'
 
 // ============================================================
-// PLUGINS ARRAY
+// CONFIG
 // ============================================================
 
-const ALL_PLUGINS = [
-    generalPlugin,
-    aiPlugin,
-    imaginePlugin,
-    animePlugin,
-    photoPlugin,
-    downloaderPlugin,
-    converterPlugin,
-    toolsPlugin,
-    extraPlugin,
-    groupPlugin,
-    ownerPlugin,
-    searchPlugin,
-    gamesPlugin,
-    settingsPlugin,
-    techPlugin,
-    funPlugin,
-    infoPlugin,
-    beraPlugin,
-    btnmenuPlugin,
-    dbaPlugin
-]
-
-// ============================================================
-// CONFIGURATION
-// ============================================================
-
-const PORT = Number(process.env.PORT || 3000)
+const PORT = process.env.PORT || 3000
 
 const MONGODB_URI = process.env.MONGODB_URI
-
-const MONGODB_DB =
-    process.env.MONGODB_DB ||
-    'cloud_ai'
-
-const MONGODB_COLLECTION =
-    process.env.MONGODB_COLLECTION ||
-    'baileys_auth'
-
-const SESSION_ID =
-    process.env.BAILEYS_SESSION_ID ||
-    'cloud-ai-main'
+const MONGODB_DB = process.env.MONGODB_DB || 'cloud_ai'
+const MONGODB_COLLECTION = process.env.MONGODB_COLLECTION || 'baileys_auth'
+const SESSION_ID = process.env.SESSION_ID || 'cloud-ai-main'
 
 const PAIRING_NUMBER =
     process.env.PAIRING_NUMBER ||
-    config.owner?.replace(/[^0-9]/g, '') ||
+    process.env.OWNER_NUMBER ||
     ''
 
-if (!MONGODB_URI) {
-    console.error(
-        '[FATAL] MONGODB_URI is missing. Add it to your BeraHost environment variables.'
-    )
-    process.exit(1)
-}
-
-// ============================================================
-// LOGGER
-// ============================================================
-
-const logger = pino({
-    level: process.env.LOG_LEVEL || 'silent'
-})
-
-// ============================================================
-// CACHE
-// ============================================================
-
-const msgRetryCounterCache = new NodeCache()
+const logger = pino({ level: 'silent' })
 
 // ============================================================
 // GLOBAL STATE
 // ============================================================
 
 let mongoClient = null
-let mongoDb = null
 let authCollection = null
 
 let activeConn = null
-let reconnectTimer = null
-let pairingTimer = null
+let socketGeneration = 0
 
+let reconnectTimer = null
 let reconnectAttempts = 0
+
 let isConnecting = false
 let shuttingDown = false
-
-let socketGeneration = 0
 let bannerShown = false
 
-let bioLoopStarted = false
-let reminderLoopStarted = false
+let pairingTimer = null
+let pairingRequested = false
 
-let lastSuccessfulConnection = 0
+let botReadyAt = null
 
 global.conn = null
 global._conn = null
+global.jidPhoneMap = global.jidPhoneMap || {}
 
 // ============================================================
-// LOGGER HELPERS
-// ============================================================
-
-const timeNow = () => {
-    const n = new Date()
-
-    const p = value =>
-        String(value).padStart(2, '0')
-
-    return `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`
-}
-
-const log = {
-    info(message) {
-        console.log(
-            `${chalk.dim(timeNow())} ${chalk.green('●')} ${message}`
-        )
-    },
-
-    success(message) {
-        console.log(
-            `${chalk.dim(timeNow())} ${chalk.greenBright('✓')} ${chalk.greenBright(message)}`
-        )
-    },
-
-    warn(message) {
-        console.log(
-            `${chalk.dim(timeNow())} ${chalk.yellow('⚠')} ${chalk.yellow(message)}`
-        )
-    },
-
-    error(message) {
-        console.log(
-            `${chalk.dim(timeNow())} ${chalk.red('✖')} ${chalk.red(message)}`
-        )
-    },
-
-    system(message) {
-        console.log(
-            `${chalk.dim(timeNow())} ${chalk.cyan('◆')} ${chalk.cyan(message)}`
-        )
-    }
-}
-
-// ============================================================
-// BANNER
-// ============================================================
-
-function printBanner() {
-    if (bannerShown) return
-
-    bannerShown = true
-
-    console.log('')
-    console.log(
-        chalk.cyanBright(
-            '╔══════════════════════════════════════════╗'
-        )
-    )
-    console.log(
-        chalk.cyanBright(
-            '║              CLOUD AI v3.2               ║'
-        )
-    )
-    console.log(
-        chalk.cyanBright(
-            '║          WhatsApp AI Agent               ║'
-        )
-    )
-    console.log(
-        chalk.cyanBright(
-            '╚══════════════════════════════════════════╝'
-        )
-    )
-    console.log('')
-}
-
-// ============================================================
-// MONGODB SERIALIZATION
+// MONGO HELPERS
 // ============================================================
 
 function serializeValue(value) {
-    return JSON.parse(
-        JSON.stringify(value, (_, current) => {
-            if (Buffer.isBuffer(current)) {
-                return {
-                    type: 'Buffer',
-                    data: current.toString('base64')
-                }
-            }
+    if (value === undefined) {
+        return { __type: 'undefined' }
+    }
 
-            if (current instanceof Uint8Array) {
-                return {
-                    type: 'Buffer',
-                    data: Buffer.from(current).toString('base64')
-                }
-            }
+    if (value === null) {
+        return null
+    }
 
-            return current
-        })
-    )
+    if (Buffer.isBuffer(value)) {
+        return {
+            __type: 'Buffer',
+            data: value.toString('base64')
+        }
+    }
+
+    if (value instanceof Uint8Array) {
+        return {
+            __type: 'Uint8Array',
+            data: Buffer.from(value).toString('base64')
+        }
+    }
+
+    if (Array.isArray(value)) {
+        return value.map(serializeValue)
+    }
+
+    if (value instanceof Date) {
+        return {
+            __type: 'Date',
+            data: value.toISOString()
+        }
+    }
+
+    if (typeof value === 'object') {
+        const result = {}
+
+        for (const [key, val] of Object.entries(value)) {
+            result[key] = serializeValue(val)
+        }
+
+        return result
+    }
+
+    return value
 }
 
 function deserializeValue(value) {
-    return JSON.parse(
-        JSON.stringify(value),
-        (_, current) => {
-            if (
-                current &&
-                current.type === 'Buffer' &&
-                typeof current.data === 'string'
-            ) {
-                return Buffer.from(current.data, 'base64')
-            }
+    if (value === null || value === undefined) {
+        return value
+    }
 
-            return current
-        }
-    )
+    if (typeof value !== 'object') {
+        return value
+    }
+
+    if (value.__type === 'Buffer') {
+        return Buffer.from(value.data, 'base64')
+    }
+
+    if (value.__type === 'Uint8Array') {
+        return new Uint8Array(
+            Buffer.from(value.data, 'base64')
+        )
+    }
+
+    if (value.__type === 'undefined') {
+        return undefined
+    }
+
+    if (value.__type === 'Date') {
+        return new Date(value.data)
+    }
+
+    if (Array.isArray(value)) {
+        return value.map(deserializeValue)
+    }
+
+    const result = {}
+
+    for (const [key, val] of Object.entries(value)) {
+        result[key] = deserializeValue(val)
+    }
+
+    return result
 }
 
 // ============================================================
-// MONGODB CONNECTION
+// CONNECT MONGO
 // ============================================================
 
 async function connectMongo() {
-    if (mongoClient && mongoDb) {
-        return
+    if (authCollection) {
+        return authCollection
     }
 
-    log.system('Connecting to MongoDB...')
+    if (!MONGODB_URI) {
+        throw new Error(
+            'MONGODB_URI is missing. Add it to BeraHost environment variables.'
+        )
+    }
+
+    console.log(chalk.cyan('🍃 Connecting to MongoDB...'))
 
     mongoClient = new MongoClient(MONGODB_URI, {
-        maxPoolSize: 10,
-        minPoolSize: 1,
         serverSelectionTimeoutMS: 15000,
-        connectTimeoutMS: 15000,
-        socketTimeoutMS: 45000
+        connectTimeoutMS: 15000
     })
 
     await mongoClient.connect()
 
-    mongoDb = mongoClient.db(MONGODB_DB)
-    authCollection = mongoDb.collection(MONGODB_COLLECTION)
+    const db = mongoClient.db(MONGODB_DB)
+
+    authCollection = db.collection(MONGODB_COLLECTION)
 
     await authCollection.createIndex(
         {
@@ -313,121 +197,125 @@ async function connectMongo() {
         }
     )
 
-    log.success(`MongoDB connected: ${MONGODB_DB}`)
+    console.log(
+        chalk.green(`✅ MongoDB connected: ${MONGODB_DB}`)
+    )
+
+    return authCollection
 }
 
 // ============================================================
-// MONGODB BAILEYS AUTH STATE
+// MONGO AUTH STATE
 // ============================================================
 
 async function useMongoAuthState(sessionId) {
+    const collection = authCollection || await connectMongo()
 
-    if (!authCollection) {
-        throw new Error('MongoDB authentication collection is not initialized')
+    let creds = {
+        noiseKey: undefined,
+        pairingEphemeralKeyPair: undefined,
+        signedIdentityKey: undefined,
+        signedPreKey: undefined,
+        registrationId: undefined,
+        advSecretKey: undefined,
+        nextPreKeyId: undefined,
+        firstUnuploadedPreKeyId: undefined,
+        accountSyncCounter: 0,
+        accountSettings: [],
+        registered: false
     }
 
-    const credsDocument =
-        await authCollection.findOne({
-            sessionId,
-            type: 'creds',
-            key: 'creds'
-        })
+    const credsDoc = await collection.findOne({
+        sessionId,
+        type: 'creds',
+        key: 'main'
+    })
 
-    let creds
+    if (credsDoc?.value) {
+        try {
+            creds = deserializeValue(credsDoc.value)
 
-    if (credsDocument?.data) {
-        creds = deserializeValue(credsDocument.data)
-        log.success('Existing Baileys credentials loaded from MongoDB.')
+            console.log(
+                chalk.green(
+                    '🔐 Existing Baileys credentials loaded from MongoDB.'
+                )
+            )
+        } catch (err) {
+            console.log(
+                chalk.yellow(
+                    `⚠️ Could not decode MongoDB credentials: ${err.message}`
+                )
+            )
+        }
     } else {
-        const {
-            initAuthCreds
-        } = await import('@whiskeysockets/baileys')
-
-        creds = initAuthCreds()
-
-        log.warn('No existing Baileys credentials found.')
+        console.log(
+            chalk.yellow(
+                '🔐 No existing Baileys credentials found in MongoDB.'
+            )
+        )
     }
 
     const keys = {
+        get: async (type, ids) => {
+            const result = {}
 
-        async get(type, ids) {
+            if (!ids?.length) {
+                return result
+            }
 
-            const documents =
-                await authCollection.find({
+            const documents = await collection
+                .find({
                     sessionId,
                     type: `key:${type}`,
                     key: {
                         $in: ids
                     }
-                }).toArray()
+                })
+                .toArray()
 
-            const result = {}
+            const map = new Map(
+                documents.map(doc => [
+                    doc.key,
+                    deserializeValue(doc.value)
+                ])
+            )
 
             for (const id of ids) {
-
-                const document =
-                    documents.find(item => item.key === id)
-
-                if (document?.data !== undefined) {
-                    result[id] =
-                        deserializeValue(document.data)
-                }
+                result[id] = map.get(id)
             }
 
             return result
         },
 
-        async set(data) {
-
+        set: async data => {
             const operations = []
 
-            for (const [type, entries] of Object.entries(data)) {
-
-                for (const [id, value] of Object.entries(entries)) {
-
-                    const keyType = `key:${type}`
-
-                    if (value === null || value === undefined) {
-
-                        operations.push({
-                            deleteOne: {
-                                filter: {
+            for (const [type, entries] of Object.entries(data || {})) {
+                for (const [key, value] of Object.entries(entries || {})) {
+                    operations.push({
+                        updateOne: {
+                            filter: {
+                                sessionId,
+                                type: `key:${type}`,
+                                key
+                            },
+                            update: {
+                                $set: {
                                     sessionId,
-                                    type: keyType,
-                                    key: id
+                                    type: `key:${type}`,
+                                    key,
+                                    value: serializeValue(value),
+                                    updatedAt: new Date()
                                 }
-                            }
-                        })
-
-                    } else {
-
-                        operations.push({
-                            updateOne: {
-                                filter: {
-                                    sessionId,
-                                    type: keyType,
-                                    key: id
-                                },
-
-                                update: {
-                                    $set: {
-                                        sessionId,
-                                        type: keyType,
-                                        key: id,
-                                        data: serializeValue(value),
-                                        updatedAt: new Date()
-                                    }
-                                },
-
-                                upsert: true
-                            }
-                        })
-                    }
+                            },
+                            upsert: true
+                        }
+                    })
                 }
             }
 
             if (operations.length) {
-                await authCollection.bulkWrite(
+                await collection.bulkWrite(
                     operations,
                     {
                         ordered: false
@@ -437,26 +325,22 @@ async function useMongoAuthState(sessionId) {
         }
     }
 
-    async function saveCreds() {
-
-        await authCollection.updateOne(
-
+    const saveCreds = async () => {
+        await collection.updateOne(
             {
                 sessionId,
                 type: 'creds',
-                key: 'creds'
+                key: 'main'
             },
-
             {
                 $set: {
                     sessionId,
                     type: 'creds',
-                    key: 'creds',
-                    data: serializeValue(creds),
+                    key: 'main',
+                    value: serializeValue(creds),
                     updatedAt: new Date()
                 }
             },
-
             {
                 upsert: true
             }
@@ -468,32 +352,51 @@ async function useMongoAuthState(sessionId) {
             creds,
             keys
         },
-
         saveCreds
     }
 }
 
 // ============================================================
-// CLEAR MONGODB SESSION
+// CLEAR MONGO SESSION
 // ============================================================
 
 async function clearMongoSession() {
-
     if (!authCollection) return
 
     await authCollection.deleteMany({
         sessionId: SESSION_ID
     })
 
-    log.warn('Baileys authentication removed from MongoDB.')
+    console.log(
+        chalk.red(
+            '🗑️ Baileys authentication removed from MongoDB.'
+        )
+    )
 }
 
 // ============================================================
-// RECONNECT TIMER
+// STATUS CODE
+// ============================================================
+
+function getDisconnectStatus(error) {
+    if (!error) {
+        return null
+    }
+
+    return (
+        error?.output?.statusCode ??
+        error?.data?.statusCode ??
+        error?.statusCode ??
+        error?.status ??
+        null
+    )
+}
+
+// ============================================================
+// SOCKET HELPERS
 // ============================================================
 
 function clearReconnectTimer() {
-
     if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
@@ -501,19 +404,13 @@ function clearReconnectTimer() {
 }
 
 function clearPairingTimer() {
-
     if (pairingTimer) {
         clearTimeout(pairingTimer)
         pairingTimer = null
     }
 }
 
-// ============================================================
-// SOCKET CHECK
-// ============================================================
-
 function isCurrentSocket(conn, generation) {
-
     return (
         !shuttingDown &&
         activeConn === conn &&
@@ -522,25 +419,28 @@ function isCurrentSocket(conn, generation) {
 }
 
 // ============================================================
-// CLOSE ACTIVE SOCKET
+// CLOSE SOCKET
 // ============================================================
 
-async function closeActiveConn() {
-
+async function closeActiveConnection() {
     const conn = activeConn
 
-    if (!conn) return
-
     activeConn = null
+    global.conn = null
+    global._conn = null
 
     clearPairingTimer()
+
+    if (!conn) {
+        return
+    }
 
     try {
         conn.ev.removeAllListeners()
     } catch {}
 
     try {
-        conn.ws?.close?.()
+        conn.ws?.removeAllListeners?.()
     } catch {}
 
     try {
@@ -551,14 +451,10 @@ async function closeActiveConn() {
         conn.end?.()
     } catch {}
 
-    global.conn = null
-    global._conn = null
-
     // Important:
-    // Give Baileys/Signal time to flush before creating another socket.
-    await new Promise(resolve =>
-        setTimeout(resolve, 800)
-    )
+    // Give Signal state / WebSocket teardown time to finish
+    // before creating another socket.
+    await new Promise(resolve => setTimeout(resolve, 1000))
 }
 
 // ============================================================
@@ -566,8 +462,9 @@ async function closeActiveConn() {
 // ============================================================
 
 function scheduleReconnect(reason = 'connection closed', delay = null) {
-
-    if (shuttingDown) return
+    if (shuttingDown) {
+        return
+    }
 
     if (reconnectTimer) {
         return
@@ -578,50 +475,93 @@ function scheduleReconnect(reason = 'connection closed', delay = null) {
     const calculatedDelay =
         delay ??
         Math.min(
-            5000 * Math.pow(1.5, reconnectAttempts - 1),
+            5000 * Math.pow(1.5, Math.min(reconnectAttempts - 1, 5)),
             30000
         )
 
-    log.warn(
-        `${reason}. Reconnecting in ${Math.round(calculatedDelay / 1000)}s...`
+    console.log(
+        chalk.yellow(
+            `🔄 Reconnecting in ${Math.round(calculatedDelay / 1000)}s — ${reason}`
+        )
     )
 
-    reconnectTimer = setTimeout(
-        async () => {
+    reconnectTimer = setTimeout(async () => {
+        reconnectTimer = null
 
-            reconnectTimer = null
+        if (shuttingDown) {
+            return
+        }
 
-            if (shuttingDown) return
+        await closeActiveConnection()
 
-            await closeActiveConn()
-
-            try {
-                await connectToWhatsApp()
-            } catch (error) {
-
-                log.error(
-                    `Reconnect failed: ${error.message}`
+        try {
+            await connectToWhatsApp()
+        } catch (err) {
+            console.error(
+                chalk.red(
+                    `[RECONNECT] ${err.message}`
                 )
+            )
 
-                scheduleReconnect(
-                    'Reconnect attempt failed'
-                )
-            }
+            scheduleReconnect(
+                'reconnect attempt failed'
+            )
+        }
+    }, calculatedDelay)
+}
 
-        },
-        calculatedDelay
+// ============================================================
+// BANNER
+// ============================================================
+
+function printBanner() {
+    if (bannerShown) {
+        return
+    }
+
+    bannerShown = true
+
+    console.log('')
+    console.log(
+        chalk.greenBright(
+            '╔══════════════════════════════════╗'
+        )
     )
+    console.log(
+        chalk.greenBright(
+            '║          ℂ𝕃𝕆𝕌𝔻 𝔸𝕀             ║'
+        )
+    )
+    console.log(
+        chalk.greenBright(
+            '║      WhatsApp Multi-Device      ║'
+        )
+    )
+    console.log(
+        chalk.greenBright(
+            '║          by 𝔹𝔼ℝ𝔸              ║'
+        )
+    )
+    console.log(
+        chalk.greenBright(
+            '╚══════════════════════════════════╝'
+        )
+    )
+    console.log('')
 }
 
 // ============================================================
 // PAIRING NUMBER
 // ============================================================
 
-function getPairingNumber() {
+function normalizePhoneNumber(number) {
+    return String(number || '')
+        .replace(/[^0-9]/g, '')
+        .trim()
+}
 
-    const number =
-        String(PAIRING_NUMBER || '')
-            .replace(/[^0-9]/g, '')
+function getPairingNumber() {
+    const number = normalizePhoneNumber(PAIRING_NUMBER)
 
     if (!number || number.length < 7) {
         return null
@@ -630,144 +570,141 @@ function getPairingNumber() {
     return number
 }
 
+function showPairingCode(code) {
+    const formatted =
+        String(code)
+            .match(/.{1,4}/g)
+            ?.join('-') || code
+
+    console.log('')
+    console.log(
+        chalk.green(
+            '┌──────────────────────────────────────────┐'
+        )
+    )
+
+    console.log(
+        chalk.green('│') +
+        chalk.white.bold(
+            `   PAIRING CODE: ${formatted}`
+        ) +
+        chalk.green(' │')
+    )
+
+    console.log(
+        chalk.green(
+            '├──────────────────────────────────────────┤'
+        )
+    )
+
+    console.log(
+        chalk.green(
+            '│  WhatsApp → Settings → Linked Devices    │'
+        )
+    )
+
+    console.log(
+        chalk.green(
+            '│  → Link a Device → Link with phone      │'
+        )
+    )
+
+    console.log(
+        chalk.green(
+            '│  number instead → enter the code         │'
+        )
+    )
+
+    console.log(
+        chalk.green(
+            '└──────────────────────────────────────────┘'
+        )
+    )
+
+    console.log('')
+}
+
 // ============================================================
-// PAIRING CODE REQUEST
+// REQUEST PAIRING CODE
 // ============================================================
 
-function schedulePairingCode(
+async function requestPairingCode(
     conn,
+    generation,
     state,
-    generation
+    phoneNumber
 ) {
-
     if (!isCurrentSocket(conn, generation)) {
         return
     }
 
+    // Already registered — never request a pairing code.
     if (state.creds.registered) {
         return
     }
 
-    const phoneNumber = getPairingNumber()
-
     if (!phoneNumber) {
-
-        log.error(
-            'No valid PAIRING_NUMBER/owner number configured.'
+        console.log(
+            chalk.red(
+                '❌ No valid pairing number configured.'
+            )
         )
-
         return
     }
 
-    clearPairingTimer()
+    if (pairingRequested) {
+        return
+    }
 
-    // IMPORTANT:
-    // Do NOT request the pairing code immediately after
-    // makeWASocket(). Give the WebSocket time to initialize.
-    pairingTimer = setTimeout(
-        async () => {
+    pairingRequested = true
 
-            pairingTimer = null
-
-            if (!isCurrentSocket(conn, generation)) {
-                return
-            }
-
-            if (state.creds.registered) {
-                return
-            }
-
-            try {
-
-                log.system(
-                    `Requesting WhatsApp pairing code for ${phoneNumber}`
-                )
-
-                const code =
-                    await conn.requestPairingCode(
-                        phoneNumber
-                    )
-
-                if (!isCurrentSocket(conn, generation)) {
-                    return
-                }
-
-                const formatted =
-                    code
-                        ?.match(/.{1,4}/g)
-                        ?.join('-') ||
-                    code
-
-                log.success(
-                    `PAIRING CODE: ${formatted}`
-                )
-
-                console.log('')
-                console.log(
-                    chalk.green(
-                        '╔══════════════════════════════════════════╗'
-                    )
-                )
-                console.log(
-                    chalk.green(
-                        `║  PAIRING CODE: ${String(formatted).padEnd(26)}║`
-                    )
-                )
-                console.log(
-                    chalk.green(
-                        '╠══════════════════════════════════════════╣'
-                    )
-                )
-                console.log(
-                    chalk.white(
-                        '║ WhatsApp → Settings → Linked Devices     ║'
-                    )
-                )
-                console.log(
-                    chalk.white(
-                        '║ → Link a Device → Link with phone       ║'
-                    )
-                )
-                console.log(
-                    chalk.white(
-                        '║ number instead → enter the code          ║'
-                    )
-                )
-                console.log(
-                    chalk.green(
-                        '╚══════════════════════════════════════════╝'
-                    )
-                )
-                console.log('')
-
-            } catch (error) {
-
-                if (!isCurrentSocket(conn, generation)) {
-                    return
-                }
-
-                log.warn(
-                    `Pairing code request failed: ${error.message}`
-                )
-
-                // VERY IMPORTANT:
-                // Do not delete MongoDB authentication here.
-                // The connection may simply not be ready yet.
-            }
-
-        },
-
-        3000
+    console.log(
+        chalk.cyan(
+            '🔐 Requesting WhatsApp pairing code...'
+        )
     )
+
+    try {
+        const code = await conn.requestPairingCode(
+            phoneNumber
+        )
+
+        if (!isCurrentSocket(conn, generation)) {
+            return
+        }
+
+        showPairingCode(code)
+
+    } catch (err) {
+        pairingRequested = false
+
+        console.log(
+            chalk.yellow(
+                `⚠️ Pairing code request failed: ${err.message}`
+            )
+        )
+
+        /*
+         * IMPORTANT:
+         *
+         * Do NOT delete MongoDB credentials here.
+         * A "Connection Closed" during pairing is not
+         * proof that the WhatsApp account was logged out.
+         *
+         * The connection.update close handler will deal
+         * with the actual disconnect.
+         */
+    }
 }
 
 // ============================================================
-// CONNECTION
+// START BOT
 // ============================================================
 
 async function connectToWhatsApp() {
-
-    if (shuttingDown) return
+    if (shuttingDown) {
+        return
+    }
 
     if (isConnecting) {
         return
@@ -782,40 +719,46 @@ async function connectToWhatsApp() {
     clearReconnectTimer()
     clearPairingTimer()
 
+    pairingRequested = false
+
+    const generation = ++socketGeneration
+
     try {
+        printBanner()
 
-        const {
-            state,
-            saveCreds
-        } = await useMongoAuthState(
-            SESSION_ID
-        )
+        const { state, saveCreds } =
+            await useMongoAuthState(SESSION_ID)
 
-        const {
-            version
-        } = await fetchLatestBaileysVersion()
+        const { version } =
+            await fetchLatestBaileysVersion()
 
-        log.system(
-            `WhatsApp Web version: ${version.join('.')}`
-        )
+        const phoneNumber =
+            getPairingNumber()
 
-        const generation =
-            ++socketGeneration
-
-        // Capture this BEFORE the socket starts.
-        //
-        // This allows us to distinguish:
-        //
-        // 401 during initial pairing
-        //
-        // from
-        //
-        // 401 after an already authenticated session.
         const wasRegisteredAtSocketStart =
             Boolean(state.creds.registered)
 
-        const conn = makeWASocket({
+        if (!wasRegisteredAtSocketStart) {
+            console.log(
+                chalk.cyan(
+                    `📱 Pairing number: ${phoneNumber || 'NOT CONFIGURED'}`
+                )
+            )
+        } else {
+            console.log(
+                chalk.green(
+                    '🔐 Registered Baileys session detected.'
+                )
+            )
+        }
 
+        console.log(
+            chalk.gray(
+                `📦 WhatsApp Web version: ${version.join('.')}`
+            )
+        )
+
+        const conn = makeWASocket({
             version,
 
             logger,
@@ -823,14 +766,11 @@ async function connectToWhatsApp() {
             auth: {
                 creds: state.creds,
 
-                keys:
-                    makeCacheableSignalKeyStore(
-                        state.keys,
-                        logger
-                    )
+                keys: makeCacheableSignalKeyStore(
+                    state.keys,
+                    logger
+                )
             },
-
-            msgRetryCounterCache,
 
             printQRInTerminal: false,
 
@@ -846,48 +786,28 @@ async function connectToWhatsApp() {
 
             generateHighQualityLinkPreview: false,
 
-            keepAliveIntervalMs:
-                20000,
+            keepAliveIntervalMs: 20000,
 
-            connectTimeoutMs:
-                90000,
+            /*
+             * Give the socket enough time to establish.
+             * This reduces false 408 timeouts.
+             */
+            connectTimeoutMs: 90000,
 
-            defaultQueryTimeoutMs:
-                30000,
+            defaultQueryTimeoutMs: 30000,
 
-            retryRequestDelayMs:
-                250,
+            retryRequestDelayMs: 250,
 
-            maxMsgRetryCount:
-                3
+            maxMsgRetryCount: 3
         })
 
         activeConn = conn
-
         global.conn = conn
-        global._conn = conn
 
-        log.system(
-            `Socket created [generation ${generation}]`
-        )
-
-        // ====================================================
-        // CREDENTIAL PERSISTENCE
-        // ====================================================
-
-        conn.ev.on(
-            'creds.update',
-            async () => {
-
-                try {
-                    await saveCreds()
-                } catch (error) {
-
-                    log.error(
-                        `Failed to persist Baileys credentials: ${error.message}`
-                    )
-                }
-            }
+        console.log(
+            chalk.gray(
+                `🔌 Socket created [generation ${generation}]`
+            )
         )
 
         // ====================================================
@@ -897,11 +817,7 @@ async function connectToWhatsApp() {
         conn.ev.on(
             'connection.update',
             async update => {
-
-                if (
-                    activeConn !== conn ||
-                    socketGeneration !== generation
-                ) {
+                if (!isCurrentSocket(conn, generation)) {
                     return
                 }
 
@@ -914,20 +830,49 @@ async function connectToWhatsApp() {
                 // CONNECTING
                 // --------------------------------------------
 
-                if (
-                    connection === 'connecting'
-                ) {
+                if (connection === 'connecting') {
+                    if (
+                        !state.creds.registered &&
+                        phoneNumber &&
+                        !pairingRequested
+                    ) {
+                        /*
+                         * Do NOT request pairing immediately.
+                         *
+                         * The other bot effectively gives the
+                         * WhatsApp socket time to establish its
+                         * transport first.
+                         */
 
-                    log.system(
-                        `Connecting to WhatsApp [generation ${generation}]...`
-                    )
+                        clearPairingTimer()
 
-                    if (!state.creds.registered) {
+                        pairingTimer = setTimeout(
+                            async () => {
+                                pairingTimer = null
 
-                        schedulePairingCode(
-                            conn,
-                            state,
-                            generation
+                                if (
+                                    !isCurrentSocket(
+                                        conn,
+                                        generation
+                                    )
+                                ) {
+                                    return
+                                }
+
+                                if (
+                                    state.creds.registered
+                                ) {
+                                    return
+                                }
+
+                                await requestPairingCode(
+                                    conn,
+                                    generation,
+                                    state,
+                                    phoneNumber
+                                )
+                            },
+                            3000
                         )
                     }
                 }
@@ -936,117 +881,115 @@ async function connectToWhatsApp() {
                 // OPEN
                 // --------------------------------------------
 
-                if (
-                    connection === 'open'
-                ) {
-
-                    if (!isCurrentSocket(conn, generation)) {
-                        return
-                    }
-
+                if (connection === 'open') {
                     clearPairingTimer()
-                    clearReconnectTimer()
+
+                    pairingRequested = false
 
                     reconnectAttempts = 0
-                    lastSuccessfulConnection =
-                        Date.now()
 
-                    isConnecting = false
+                    botReadyAt =
+                        botReadyAt ||
+                        Math.floor(Date.now() / 1000)
 
-                    log.success(
-                        `WhatsApp connected as ${conn.user?.name || 'CLOUD AI'}`
-                    )
+                    global.botReadyAt =
+                        botReadyAt
+
+                    global.conn = conn
+                    global._conn = conn
 
                     const botJid =
                         jidNormalizedUser(
                             conn.user?.id || ''
                         )
 
-                    log.system(
-                        `Bot JID: ${botJid}`
+                    console.log('')
+                    console.log(
+                        chalk.greenBright(
+                            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+                        )
                     )
 
-                    global.conn = conn
-                    global._conn = conn
+                    console.log(
+                        chalk.greenBright(
+                            `✅ WHATSAPP CONNECTED`
+                        )
+                    )
 
-                    // Resolve LID if supported
+                    console.log(
+                        chalk.green(
+                            `👤 ${conn.user?.name || 'Cloud AI'}`
+                        )
+                    )
+
+                    console.log(
+                        chalk.green(
+                            `📱 ${botJid}`
+                        )
+                    )
+
+                    console.log(
+                        chalk.greenBright(
+                            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+                        )
+                    )
+
+                    /*
+                     * Save credentials immediately after
+                     * successful connection.
+                     */
                     try {
-
-                        if (
-                            conn.user?.lid &&
-                            conn.user?.id
-                        ) {
-
-                            lidMap.set(
-                                conn.user.lid,
-                                conn.user.id
+                        await saveCreds()
+                    } catch (err) {
+                        console.log(
+                            chalk.yellow(
+                                `⚠️ Could not save credentials: ${err.message}`
                             )
-                        }
+                        )
+                    }
 
-                    } catch {}
-
-                    // Start loops only once
+                    // Start your existing loops/hooks here.
                     startReminderLoop(conn)
                     startBioLoop(conn)
 
-                    // ----------------------------------------
-                    // OWNER ONLINE MESSAGE
-                    // ----------------------------------------
+                    /*
+                     * Optional bot profile picture.
+                     */
+                    applyBotImage(
+                        conn,
+                        botJid
+                    ).catch(() => {})
 
+                    /*
+                     * Owner online notification.
+                     */
                     try {
-
-                        const ownerNumber =
-                            String(
-                                config.owner || ''
-                            ).replace(
-                                /[^0-9]/g,
+                        const owner =
+                            normalizePhoneNumber(
+                                process.env.OWNER_NUMBER ||
+                                process.env.PAIRING_NUMBER ||
                                 ''
                             )
 
-                        if (ownerNumber) {
-
-                            const ownerJid =
-                                `${ownerNumber}@s.whatsapp.net`
-
-                            const prefix =
-                                global.db?.data?.settings?.prefix ||
-                                config.prefix ||
-                                '.'
-
-                            const now =
-                                moment().format(
-                                    'YYYY-MM-DD HH:mm:ss'
-                                )
-
+                        if (owner) {
                             await conn.sendMessage(
-                                ownerJid,
+                                `${owner}@s.whatsapp.net`,
                                 {
-                                    text: [
-                                        '━━━━━━━━━━━━━━━━━━━━━',
-                                        '🤖 *CLOUD AI — ONLINE*',
-                                        '━━━━━━━━━━━━━━━━━━━━━',
-                                        '',
-                                        '✅ Successfully connected to WhatsApp.',
-                                        '',
-                                        `🕐 *Time:* ${now}`,
-                                        `⚡ *Prefix:* ${prefix}`,
-                                        `🔖 *Version:* 3.2.0`,
-                                        '',
-                                        `💬 Chat with me: *${prefix}bera hello*`,
-                                        `📋 Commands: *${prefix}menu*`,
-                                        '',
-                                        '━━━━━━━━━━━━━━━━━━━━━',
-                                        '_CLOUD AI is ready._',
+                                    text:
+                                        '━━━━━━━━━━━━━━━━━━━━━\n' +
+                                        '🤖 *CLOUD AI — ONLINE*\n' +
+                                        '━━━━━━━━━━━━━━━━━━━━━\n\n' +
+                                        '✅ Successfully connected to WhatsApp.\n\n' +
+                                        '⚡ Bot is ready and running.\n\n' +
                                         '━━━━━━━━━━━━━━━━━━━━━'
-                                    ].join('\n')
                                 }
                             )
                         }
-
-                    } catch (error) {
-
-                        log.warn(
-                            `Could not send online message: ${error.message}`
+                    } catch (err) {
+                        console.log(
+                            chalk.yellow(
+                                `⚠️ Online notification failed: ${err.message}`
+                            )
                         )
                     }
                 }
@@ -1055,211 +998,219 @@ async function connectToWhatsApp() {
                 // CLOSE
                 // --------------------------------------------
 
-                if (
-                    connection === 'close'
-                ) {
-
+                if (connection === 'close') {
                     clearPairingTimer()
 
+                    pairingRequested = false
+
                     if (
-                        activeConn !== conn ||
-                        socketGeneration !== generation
+                        !isCurrentSocket(
+                            conn,
+                            generation
+                        )
                     ) {
                         return
                     }
 
+                    /*
+                     * Detach this socket immediately.
+                     * This prevents another connection from
+                     * being considered active at the same time.
+                     */
                     activeConn = null
 
-                    if (global.conn === conn) {
-                        global.conn = null
-                    }
-
-                    if (global._conn === conn) {
-                        global._conn = null
-                    }
-
-                    isConnecting = false
-
-                    const error =
-                        lastDisconnect?.error
+                    global.conn = null
+                    global._conn = null
 
                     const statusCode =
-                        error instanceof Boom
-                            ? error.output?.statusCode
-                            : error?.output?.statusCode ||
-                              error?.statusCode ||
-                              null
+                        getDisconnectStatus(
+                            lastDisconnect?.error
+                        )
 
-                    log.warn(
-                        `WhatsApp connection closed. Code: ${statusCode ?? 'unknown'}`
+                    console.log(
+                        chalk.yellow(
+                            `🔌 Connection closed. Code: ${statusCode ?? 'unknown'}`
+                        )
                     )
 
-                    // ========================================
-                    // 401 / LOGGED OUT
-                    // ========================================
+                    // ----------------------------------------
+                    // 440 = CONNECTION REPLACED
+                    // ----------------------------------------
 
                     if (
                         statusCode ===
-                        DisconnectReason.loggedOut ||
-                        statusCode === 401
+                        DisconnectReason.connectionReplaced
                     ) {
-
-                        // ------------------------------------
-                        // CRITICAL FIX
-                        //
-                        // If the socket was never registered
-                        // and pairing itself failed, DO NOT
-                        // delete MongoDB auth.
-                        // ------------------------------------
-
-                        const currentlyRegistered =
-                            Boolean(
-                                state.creds.registered
+                        console.log(
+                            chalk.red(
+                                '🛑 Connection replaced by another WhatsApp session.'
                             )
+                        )
+
+                        console.log(
+                            chalk.red(
+                                '🛑 Automatic reconnect stopped to prevent dual sockets.'
+                            )
+                        )
+
+                        return
+                    }
+
+                    // ----------------------------------------
+                    // 401 = LOGGED OUT
+                    // ----------------------------------------
+
+                    if (
+                        statusCode ===
+                        DisconnectReason.loggedOut
+                    ) {
+                        /*
+                         * CRITICAL:
+                         *
+                         * If this socket started while the account
+                         * was NOT registered, then a 401 can occur
+                         * simply because the pairing attempt failed.
+                         *
+                         * DO NOT DELETE MongoDB auth in that case.
+                         */
 
                         if (
                             !wasRegisteredAtSocketStart &&
-                            !currentlyRegistered
+                            !state.creds.registered
                         ) {
-
-                            log.warn(
-                                '401 occurred during initial pairing. Keeping MongoDB authentication.'
+                            console.log(
+                                chalk.yellow(
+                                    '⚠️ 401 occurred during initial pairing.'
+                                )
                             )
 
-                            log.system(
-                                'Retrying pairing without deleting stored credentials...'
+                            console.log(
+                                chalk.yellow(
+                                    '🔐 MongoDB authentication will NOT be deleted.'
+                                )
                             )
 
                             scheduleReconnect(
-                                'Initial pairing connection closed',
+                                'initial pairing connection closed',
                                 5000
                             )
 
                             return
                         }
 
-                        // ------------------------------------
-                        // Genuine logout of an authenticated
-                        // WhatsApp session.
-                        // ------------------------------------
-
-                        log.error(
-                            'WhatsApp session was genuinely logged out.'
+                        /*
+                         * This was an already authenticated
+                         * WhatsApp session.
+                         *
+                         * Now a 401 genuinely means logout.
+                         */
+                        console.log(
+                            chalk.red(
+                                '🚪 Existing WhatsApp session was genuinely logged out.'
+                            )
                         )
 
                         try {
                             await clearMongoSession()
-                        } catch (error) {
-
-                            log.error(
-                                `Could not clear MongoDB auth: ${error.message}`
+                        } catch (err) {
+                            console.log(
+                                chalk.red(
+                                    `❌ Failed clearing MongoDB auth: ${err.message}`
+                                )
                             )
                         }
 
                         reconnectAttempts = 0
 
                         scheduleReconnect(
-                            'Starting fresh WhatsApp authentication',
+                            'session logged out — fresh pairing required',
                             3000
                         )
 
                         return
                     }
 
-                    // ========================================
-                    // 440 — CONNECTION REPLACED
-                    // ========================================
+                    // ----------------------------------------
+                    // 408 = TIMEOUT
+                    // ----------------------------------------
 
                     if (
                         statusCode ===
-                        DisconnectReason.connectionReplaced ||
-                        statusCode === 440
+                        DisconnectReason.timedOut
                     ) {
-
-                        log.error(
-                            'Connection replaced (440). Automatic reconnect stopped to prevent dual-socket conflicts.'
+                        console.log(
+                            chalk.yellow(
+                                state.creds.registered
+                                    ? '⏱️ Connection timed out — reconnecting without clearing auth.'
+                                    : '⏱️ Pairing connection timed out — keeping MongoDB auth.'
+                            )
                         )
 
-                        log.warn(
-                            'Only one WhatsApp socket should use this session.'
-                        )
-
-                        return
-                    }
-
-                    // ========================================
-                    // 408 — TIMEOUT
-                    // ========================================
-
-                    if (
-                        statusCode ===
-                        DisconnectReason.timedOut ||
-                        statusCode === 408
-                    ) {
-
-                        log.warn(
-                            state.creds.registered
-                                ? 'WhatsApp connection timed out. Authentication will NOT be deleted.'
-                                : 'Pairing connection timed out. Authentication will NOT be deleted.'
-                        )
-
+                        /*
+                         * NEVER clear MongoDB auth for 408.
+                         */
                         scheduleReconnect(
-                            '408 connection timeout',
+                            '408 timeout',
                             6000
                         )
 
                         return
                     }
 
-                    // ========================================
-                    // 515 — RESTART REQUIRED
-                    // ========================================
+                    // ----------------------------------------
+                    // 515 = RESTART REQUIRED
+                    // ----------------------------------------
 
                     if (
-                        statusCode === 515 ||
                         statusCode ===
                         DisconnectReason.restartRequired
                     ) {
-
-                        log.warn(
-                            'WhatsApp requested a restart.'
+                        console.log(
+                            chalk.yellow(
+                                '🔄 WhatsApp requested a socket restart.'
+                            )
                         )
 
                         scheduleReconnect(
-                            'Restart required',
-                            8000
+                            'WhatsApp restart required',
+                            3000
                         )
 
                         return
                     }
 
-                    // ========================================
-                    // 503 — UNAVAILABLE
-                    // ========================================
+                    // ----------------------------------------
+                    // 503 / 500 / 502 / NETWORK
+                    // ----------------------------------------
 
-                    if (
-                        statusCode === 503
-                    ) {
-
-                        log.warn(
-                            'WhatsApp service temporarily unavailable.'
+                    console.log(
+                        chalk.yellow(
+                            `⚠️ Disconnected (code ${statusCode ?? 'unknown'}) — reconnecting without clearing auth.`
                         )
-
-                        scheduleReconnect(
-                            '503 service unavailable',
-                            7000
-                        )
-
-                        return
-                    }
-
-                    // ========================================
-                    // GENERIC DISCONNECT
-                    // ========================================
+                    )
 
                     scheduleReconnect(
-                        `WhatsApp disconnected (${statusCode ?? 'unknown'})`,
-                        6000
+                        `disconnect ${statusCode ?? 'unknown'}`,
+                        5000
+                    )
+                }
+            }
+        )
+
+        // ====================================================
+        // CREDENTIAL PERSISTENCE
+        // ====================================================
+
+        conn.ev.on(
+            'creds.update',
+            async () => {
+                try {
+                    await saveCreds()
+                } catch (err) {
+                    console.log(
+                        chalk.red(
+                            `❌ MongoDB creds save failed: ${err.message}`
+                        )
                     )
                 }
             }
@@ -1272,192 +1223,149 @@ async function connectToWhatsApp() {
         const originalSendMessage =
             conn.sendMessage.bind(conn)
 
-        conn.sendMessage =
-            async (jid, content, options) => {
+        conn.sendMessage = async (
+            jid,
+            content,
+            options
+        ) => {
+            try {
+                if (
+                    !content?.react &&
+                    !content?.delete
+                ) {
+                    const preview =
+                        content?.text
+                            ? content.text
+                                .slice(0, 90)
+                                .replace(/\n/g, ' ')
+                            : content?.image
+                                ? '📷 [image]'
+                                : content?.audio
+                                    ? '🎵 [audio]'
+                                    : content?.video
+                                        ? '🎬 [video]'
+                                        : content?.sticker
+                                            ? '🎴 [sticker]'
+                                            : content?.document
+                                                ? '📄 [document]'
+                                                : '[media]'
 
-                try {
-
-                    if (
-                        content &&
-                        !content.react &&
-                        !content.delete
-                    ) {
-
-                        let preview =
-                            '[message]'
-
-                        if (content.text) {
-                            preview =
-                                content.text
-                                    .slice(0, 90)
-                                    .replace(/\n/g, ' ')
-                        } else if (content.image) {
-                            preview = '📷 [image]'
-                        } else if (content.video) {
-                            preview = '🎬 [video]'
-                        } else if (content.audio) {
-                            preview = '🎵 [audio]'
-                        } else if (content.sticker) {
-                            preview = '🎴 [sticker]'
-                        } else if (content.document) {
-                            preview = '📄 [document]'
-                        }
-
-                        log.info(
-                            `SENT → ${jid}: ${preview}`
+                    console.log(
+                        chalk.cyan(
+                            `📤 SENT → ${jid}: ${preview}`
                         )
-                    }
+                    )
+                }
+            } catch {}
 
-                } catch {}
-
-                return originalSendMessage(
-                    jid,
-                    content,
-                    options
-                )
-            }
+            return originalSendMessage(
+                jid,
+                content,
+                options
+            )
+        }
 
         // ====================================================
-        // MESSAGES
+        // INCOMING MESSAGES
         // ====================================================
 
         conn.ev.on(
             'messages.upsert',
             async ({ messages, type }) => {
-
-                if (
-                    activeConn !== conn ||
-                    socketGeneration !== generation
-                ) {
+                if (type !== 'notify') {
                     return
                 }
 
                 if (
-                    type !== 'notify' &&
-                    type !== 'append'
+                    !isCurrentSocket(
+                        conn,
+                        generation
+                    )
                 ) {
                     return
                 }
 
                 for (const msg of messages) {
-
-                    if (!msg?.message) {
-                        continue
-                    }
-
                     try {
-
-                        const remoteJid =
-                            msg.key?.remoteJid
-
-                        // ------------------------------------
-                        // STATUS
-                        // ------------------------------------
-
                         if (
-                            remoteJid ===
+                            msg.key?.remoteJid ===
                             'status@broadcast'
                         ) {
-
-                            try {
-
-                                if (
-                                    global.db?.data
-                                        ?.settings
-                                        ?.autoStatusView
-                                ) {
-
-                                    await conn.readMessages([
-                                        msg.key
-                                    ])
-                                }
-
-                            } catch {}
-
-                            continue
-                        }
-
-                        // ------------------------------------
-                        // LID MAPPING
-                        // ------------------------------------
-
-                        try {
-
-                            const participant =
-                                msg.key?.participant
-
                             if (
-                                participant &&
-                                participant.endsWith('@lid')
-                            ) {
-
-                                const contact =
-                                    msg.pushName ||
-                                    participant
-
-                                if (
-                                    msg.key.remoteJid &&
-                                    msg.key.remoteJid.endsWith(
-                                        '@s.whatsapp.net'
-                                    )
-                                ) {
-
-                                    lidMap.set(
-                                        participant,
-                                        msg.key.remoteJid
-                                    )
-                                }
-
-                                void contact
-                            }
-
-                        } catch {}
-
-                        // ------------------------------------
-                        // AUTO READ
-                        // ------------------------------------
-
-                        try {
-
-                            if (
-                                !msg.key?.fromMe &&
                                 global.db?.data
                                     ?.settings
-                                    ?.autoRead
+                                    ?.autoStatusView
                             ) {
-
                                 await conn.readMessages([
                                     msg.key
                                 ])
                             }
 
-                        } catch {}
+                            continue
+                        }
 
-                        // ------------------------------------
-                        // MESSAGE HANDLER
-                        // ------------------------------------
+                        if (!msg.key?.fromMe) {
+                            const rawJid =
+                                msg.key?.participant ||
+                                msg.key?.remoteJid ||
+                                ''
 
-                        try {
+                            if (
+                                rawJid.endsWith(
+                                    '@s.whatsapp.net'
+                                )
+                            ) {
+                                global.jidPhoneMap[
+                                    rawJid
+                                ] =
+                                    rawJid.split('@')[0]
+                            }
 
-                            await Handler(
-                                conn,
-                                msg,
-                                ALL_PLUGINS
-                            )
+                            const M =
+                                msg.message || {}
 
-                        } catch (error) {
+                            const mtype =
+                                Object.keys(M)
+                                    .find(
+                                        key =>
+                                            key !==
+                                            'messageContextInfo'
+                                    )
 
-                            console.error(
-                                '[MESSAGE HANDLER]',
-                                error.message
+                            const messageObject =
+                                mtype
+                                    ? M[mtype]
+                                    : null
+
+                            const text =
+                                messageObject?.text ||
+                                messageObject?.caption ||
+                                (
+                                    mtype ===
+                                    'conversation'
+                                        ? M.conversation
+                                        : ''
+                                ) ||
+                                '[message]'
+
+                            console.log(
+                                chalk.green(
+                                    `📥 RECV ← ${rawJid}: ${String(text)
+                                        .slice(0, 90)
+                                        .replace(/\n/g, ' ')}`
+                                )
                             )
                         }
 
-                    } catch (error) {
-
+                        await handleMessage(
+                            conn,
+                            msg
+                        )
+                    } catch (err) {
                         console.error(
-                            '[MESSAGE]',
-                            error.message
+                            chalk.red(
+                                `[MESSAGE ERROR] ${err.message}`
+                            )
                         )
                     }
                 }
@@ -1470,158 +1378,130 @@ async function connectToWhatsApp() {
 
         conn.ev.on(
             'group-participants.update',
-            async update => {
-
-                if (
-                    activeConn !== conn ||
-                    socketGeneration !== generation
-                ) {
-                    return
-                }
-
+            async event => {
                 try {
-
-                    await onGroupUpdate(
+                    await handleGroupEvents(
                         conn,
-                        update
+                        {
+                            'group-participants.update': [
+                                event
+                            ]
+                        }
                     )
-
-                } catch (error) {
-
+                } catch (err) {
                     console.error(
-                        '[GROUP]',
-                        error.message
+                        chalk.red(
+                            `[GROUP ERROR] ${err.message}`
+                        )
                     )
                 }
             }
         )
 
         // ====================================================
-        // CALL EVENTS
+        // ANTI DELETE
+        // ====================================================
+
+        conn.ev.on(
+            'messages.delete',
+            async deleteEvent => {
+                try {
+                    await handleAntiDelete(
+                        conn,
+                        deleteEvent
+                    )
+                } catch {}
+            }
+        )
+
+        // ====================================================
+        // ANTI EDIT
+        // ====================================================
+
+        conn.ev.on(
+            'messages.update',
+            async updates => {
+                try {
+                    await handleAntiEdit(
+                        conn,
+                        { updates }
+                    )
+                } catch {}
+            }
+        )
+
+        // ====================================================
+        // ANTI CALL
         // ====================================================
 
         conn.ev.on(
             'call',
             async callEvents => {
-
-                if (
-                    activeConn !== conn ||
-                    socketGeneration !== generation
-                ) {
-                    return
-                }
-
                 try {
+                    const anticall =
+                        global.db?.data
+                            ?.settings
+                            ?.anticall
 
-                    if (
-                        typeof handleCall ===
-                        'function'
-                    ) {
-
-                        await handleCall(
-                            conn,
-                            callEvents
-                        )
-
-                    } else if (
-                        typeof Callupdate ===
-                        'function'
-                    ) {
-
-                        await Callupdate(
-                            conn,
-                            callEvents
-                        )
+                    if (!anticall) {
+                        return
                     }
 
-                } catch (error) {
-
-                    console.error(
-                        '[CALL]',
-                        error.message
-                    )
-                }
-            }
-        )
-
-        // ====================================================
-        // CONTACTS / CHATS
-        // ====================================================
-
-        conn.ev.on(
-            'contacts.upsert',
-            contacts => {
-
-                try {
-
-                    for (
-                        const contact
-                        of contacts
-                    ) {
-
+                    for (const callEvent of callEvents) {
                         if (
-                            contact.id &&
-                            contact.id.endsWith('@lid') &&
-                            contact.notify
+                            callEvent.status !==
+                            'offer'
                         ) {
-
-                            lidMap.set(
-                                contact.id,
-                                contact.notify
-                            )
+                            continue
                         }
-                    }
 
+                        try {
+                            await conn.rejectCall(
+                                callEvent.id,
+                                callEvent.from
+                            )
+
+                            await conn.sendMessage(
+                                callEvent.from,
+                                {
+                                    text:
+                                        '📵 *Anti-Call is enabled.*\n' +
+                                        'Voice and video calls are automatically rejected.'
+                                }
+                            )
+                        } catch {}
+                    }
                 } catch {}
             }
         )
 
-        conn.ev.on(
-            'contacts.update',
-            contacts => {
+        return conn
 
-                try {
+    } catch (err) {
+        /*
+         * Socket creation itself failed.
+         *
+         * Do NOT delete MongoDB auth.
+         */
+        activeConn = null
+        global.conn = null
+        global._conn = null
 
-                    for (
-                        const contact
-                        of contacts
-                    ) {
-
-                        if (
-                            contact.id &&
-                            contact.id.endsWith('@lid') &&
-                            contact.notify
-                        ) {
-
-                            lidMap.set(
-                                contact.id,
-                                contact.notify
-                            )
-                        }
-                    }
-
-                } catch {}
-            }
-        )
-
-    } catch (error) {
-
-        isConnecting = false
-
-        if (
-            activeConn
-        ) {
-            await closeActiveConn()
-        }
-
-        log.error(
-            `Socket creation failed: ${error.message}`
+        console.error(
+            chalk.red(
+                `[SOCKET ERROR] ${err.message}`
+            )
         )
 
         scheduleReconnect(
-            'Socket creation failure',
-            7000
+            'socket creation failed',
+            5000
         )
+
+        throw err
+
+    } finally {
+        isConnecting = false
     }
 }
 
@@ -1629,105 +1509,17 @@ async function connectToWhatsApp() {
 // AUTO BIO
 // ============================================================
 
-function resolveBioVars(template) {
-
-    const now = new Date()
-
-    const pad = n =>
-        String(n).padStart(2, '0')
-
-    const time =
-        `${pad(now.getHours())}:${pad(now.getMinutes())}`
-
-    const days = [
-        'Sunday',
-        'Monday',
-        'Tuesday',
-        'Wednesday',
-        'Thursday',
-        'Friday',
-        'Saturday'
-    ]
-
-    const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec'
-    ]
-
-    const date =
-        `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`
-
-    const users =
-        Object.keys(
-            global.db?.data?.users || {}
-        ).filter(
-            jid =>
-                !jid.includes('@newsletter')
-        ).length
-
-    const commands =
-        global.db?.data?.stats
-            ?.totalCommands || 0
-
-    return String(template)
-        .replace(
-            /\{time\}/gi,
-            time
-        )
-        .replace(
-            /\{date\}/gi,
-            date
-        )
-        .replace(
-            /\{users\}/gi,
-            users
-        )
-        .replace(
-            /\{commands\}/gi,
-            commands
-        )
-        .replace(
-            /\{botname\}/gi,
-            config.botName || 'CLOUD AI'
-        )
-}
-
-// ============================================================
-// BIO LOOP
-// ============================================================
+let bioLoopStarted = false
 
 function startBioLoop(conn) {
-
     if (bioLoopStarted) {
         return
     }
 
     bioLoopStarted = true
 
-    log.info(
-        'Auto-bio loop started.'
-    )
-
     const applyBio = async () => {
-
         try {
-
-            if (
-                activeConn !== conn
-            ) {
-                return
-            }
-
             const settings =
                 global.db?.data?.settings
 
@@ -1746,9 +1538,58 @@ function startBioLoop(conn) {
                 (settings.currentBioIndex || 0) %
                 bios.length
 
-            const bio =
-                resolveBioVars(
-                    bios[index]
+            const now = new Date()
+
+            const pad =
+                value =>
+                    String(value)
+                        .padStart(2, '0')
+
+            const time =
+                `${pad(now.getHours())}:${pad(now.getMinutes())}`
+
+            const days = [
+                'Sunday',
+                'Monday',
+                'Tuesday',
+                'Wednesday',
+                'Thursday',
+                'Friday',
+                'Saturday'
+            ]
+
+            const months = [
+                'Jan',
+                'Feb',
+                'Mar',
+                'Apr',
+                'May',
+                'Jun',
+                'Jul',
+                'Aug',
+                'Sep',
+                'Oct',
+                'Nov',
+                'Dec'
+            ]
+
+            const date =
+                `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`
+
+            let bio = bios[index]
+
+            bio = bio
+                .replace(
+                    /\{time\}/gi,
+                    time
+                )
+                .replace(
+                    /\{date\}/gi,
+                    date
+                )
+                .replace(
+                    /\{botname\}/gi,
+                    'CLOUD AI'
                 )
 
             await conn.updateProfileStatus(
@@ -1759,12 +1600,7 @@ function startBioLoop(conn) {
                 (index + 1) %
                 bios.length
 
-            if (
-                typeof global.db?.write ===
-                'function'
-            ) {
-                await global.db.write()
-            }
+            await global.db.write()
 
         } catch {}
     }
@@ -1778,40 +1614,25 @@ function startBioLoop(conn) {
 }
 
 // ============================================================
-// REMINDER LOOP
+// REMINDERS
 // ============================================================
 
-function startReminderLoop(conn) {
+let reminderLoopStarted = false
 
+function startReminderLoop(conn) {
     if (reminderLoopStarted) {
         return
     }
 
     reminderLoopStarted = true
 
-    log.info(
-        'Reminder loop started.'
-    )
-
     setInterval(
         async () => {
-
             try {
-
-                if (
-                    activeConn !== conn
-                ) {
-                    return
-                }
-
                 const reminders =
-                    global.db?.data
-                        ?.reminders
+                    global.db?.data?.reminders
 
-                if (
-                    !Array.isArray(reminders) ||
-                    !reminders.length
-                ) {
+                if (!reminders?.length) {
                     return
                 }
 
@@ -1834,85 +1655,123 @@ function startReminderLoop(conn) {
                             reminder.fireAt > now
                     )
 
-                if (
-                    typeof global.db?.write ===
-                    'function'
-                ) {
-                    await global.db.write()
-                }
+                await global.db.write()
 
-                for (
-                    const reminder
-                    of due
-                ) {
-
+                for (const reminder of due) {
                     try {
-
                         await conn.sendMessage(
                             reminder.chat,
                             {
                                 text:
-                                    `⏰ *Reminder!*\n\n_${reminder.msg}_`
+                                    `⏰ *Reminder!*\n\n${reminder.msg}`
                             }
                         )
-
-                    } catch (error) {
-
-                        console.error(
-                            '[REMINDER]',
-                            error.message
-                        )
-                    }
+                    } catch {}
                 }
-
             } catch {}
         },
-
         30000
     )
 }
 
 // ============================================================
-// ERROR PROTECTION
+// BOT IMAGE
+// ============================================================
+
+async function applyBotImage(
+    conn,
+    botJid
+) {
+    const src =
+        process.env.BOT_IMAGE?.trim()
+
+    if (!src) {
+        return
+    }
+
+    try {
+        let buffer
+
+        if (
+            src.startsWith('http://') ||
+            src.startsWith('https://')
+        ) {
+            const response =
+                await axios.get(
+                    src,
+                    {
+                        responseType:
+                            'arraybuffer',
+                        timeout: 15000
+                    }
+                )
+
+            buffer =
+                Buffer.from(
+                    response.data
+                )
+        } else if (
+            fs.existsSync(src)
+        ) {
+            buffer =
+                fs.readFileSync(src)
+        } else {
+            return
+        }
+
+        if (
+            typeof conn.updateProfilePicture ===
+            'function'
+        ) {
+            await conn.updateProfilePicture(
+                botJid,
+                buffer
+            )
+        }
+    } catch {}
+}
+
+// ============================================================
+// GLOBAL ERROR HANDLERS
 // ============================================================
 
 process.on(
     'uncaughtException',
     error => {
-
         const message =
             error?.message || ''
 
-        log.error(
-            `Uncaught exception: ${message}`
+        console.error(
+            chalk.red(
+                `[UNCAUGHT] ${message}`
+            )
         )
 
         if (
-            message.includes(
-                'Unsupported state'
-            ) ||
-            message.includes(
-                'authenticate data'
-            ) ||
-            message.includes(
-                'aesDecryptGCM'
-            )
+            message.includes('aesDecryptGCM') ||
+            message.includes('Unsupported state') ||
+            message.includes('authenticate data')
         ) {
-
-            log.warn(
-                'Crypto/socket error detected. Scheduling clean reconnect.'
+            console.log(
+                chalk.yellow(
+                    '⚠️ Crypto error detected — performing controlled reconnect.'
+                )
             )
 
             scheduleReconnect(
-                'Crypto error',
+                'crypto error',
                 6000
             )
 
             return
         }
 
+        /*
+         * Do not immediately spawn another socket.
+         * scheduleReconnect() guarantees only one timer.
+         */
         scheduleReconnect(
-            'Unhandled runtime error',
+            'uncaught exception',
             8000
         )
     }
@@ -1921,29 +1780,23 @@ process.on(
 process.on(
     'unhandledRejection',
     reason => {
-
         const message =
             reason?.message ||
             String(reason)
 
-        log.error(
-            `Unhandled rejection: ${message.slice(0, 300)}`
+        console.error(
+            chalk.yellow(
+                `[UNHANDLED] ${message.slice(0, 300)}`
+            )
         )
 
         if (
-            message.includes(
-                'Unsupported state'
-            ) ||
-            message.includes(
-                'authenticate data'
-            ) ||
-            message.includes(
-                'aesDecryptGCM'
-            )
+            message.includes('aesDecryptGCM') ||
+            message.includes('Unsupported state') ||
+            message.includes('authenticate data')
         ) {
-
             scheduleReconnect(
-                'Crypto rejection',
+                'crypto rejection',
                 6000
             )
         }
@@ -1954,27 +1807,23 @@ process.on(
 // GRACEFUL SHUTDOWN
 // ============================================================
 
-let shuttingDownStarted = false
-
 async function shutdown(signal) {
-
-    if (shuttingDownStarted) {
+    if (shuttingDown) {
         return
     }
 
-    shuttingDownStarted = true
     shuttingDown = true
 
-    log.warn(
-        `${signal} received. Shutting down...`
+    console.log(
+        chalk.yellow(
+            `🛑 ${signal} received. Shutting down...`
+        )
     )
 
     clearReconnectTimer()
     clearPairingTimer()
 
-    try {
-        await closeActiveConn()
-    } catch {}
+    await closeActiveConnection()
 
     try {
         if (mongoClient) {
@@ -1996,203 +1845,59 @@ process.on(
 )
 
 // ============================================================
-// HTTP HEALTH SERVER
+// HEALTH SERVER
 // ============================================================
 
-const app = express()
+http.createServer(
+    (req, res) => {
+        res.writeHead(
+            200,
+            {
+                'Content-Type':
+                    'text/plain'
+            }
+        )
 
-app.get(
-    '/',
-    (_, res) => {
-
-        res.status(200).json({
-            status: 'online',
-            bot: config.botName || 'CLOUD AI',
-            whatsapp:
-                activeConn
-                    ? 'connected'
-                    : 'disconnected',
-            mongodb:
-                mongoDb
-                    ? 'connected'
-                    : 'disconnected',
-            uptime:
-                process.uptime(),
-            reconnectAttempts
-        })
+        res.end(
+            activeConn
+                ? 'CLOUD AI Bot is running 🤖\nWhatsApp: connected'
+                : 'CLOUD AI Bot is running 🤖\nWhatsApp: reconnecting'
+        )
     }
-)
-
-app.get(
-    '/health',
-    (_, res) => {
-
-        res.status(
-            activeConn ? 200 : 503
-        ).json({
-
-            status:
-                activeConn
-                    ? 'healthy'
-                    : 'disconnected',
-
-            whatsapp:
-                Boolean(activeConn),
-
-            mongodb:
-                Boolean(mongoDb),
-
-            uptime:
-                process.uptime()
-        })
-    }
-)
-
-const server =
-    http.createServer(app)
-
-server.listen(
+).listen(
     PORT,
     '0.0.0.0',
     () => {
-
-        log.success(
-            `Keep-alive server listening on port ${PORT}`
+        console.log(
+            chalk.gray(
+                `🌐 Keep-alive server: port ${PORT}`
+            )
         )
     }
 )
-
-// ============================================================
-// STARTUP
-// ============================================================
-
-async function start() {
-
-    printBanner()
-
-    try {
-
-        // --------------------------------------------
-        // MongoDB MUST be ready before WhatsApp.
-        // --------------------------------------------
-
-        await connectMongo()
-
-        // --------------------------------------------
-        // Initialize existing application DB.
-        // --------------------------------------------
-
-        // Your existing application database initialization
-        // should remain here if it is part of your project.
-        //
-        // Example:
-        //
-        // await initDb()
-        //
-        // It is intentionally guarded because your current
-        // CLOUD AI project already owns this layer.
-
-        try {
-
-            if (
-                typeof global.initDb ===
-                'function'
-            ) {
-                await global.initDb()
-            }
-
-        } catch (error) {
-
-            log.warn(
-                `Application DB initialization skipped: ${error.message}`
-            )
-        }
-
-        // --------------------------------------------
-        // yt-dlp
-        // --------------------------------------------
-
-        try {
-
-            await ensureYtDlp()
-
-        } catch (error) {
-
-            log.warn(
-                `yt-dlp initialization failed: ${error.message}`
-            )
-        }
-
-        // --------------------------------------------
-        // WhatsApp
-        // --------------------------------------------
-
-        await connectToWhatsApp()
-
-    } catch (error) {
-
-        log.error(
-            `Startup failed: ${error.message}`
-        )
-
-        scheduleReconnect(
-            'Startup failure',
-            10000
-        )
-    }
-}
 
 // ============================================================
 // START
 // ============================================================
 
+async function start() {
+    try {
+        await connectMongo()
+
+        await connectToWhatsApp()
+
+    } catch (error) {
+        console.error(
+            chalk.red(
+                `[START ERROR] ${error.message}`
+            )
+        )
+
+        scheduleReconnect(
+            'startup failed',
+            10000
+        )
+    }
+}
+
 start()
-
-// ============================================================
-// HEARTBEAT
-// ============================================================
-
-setInterval(
-    () => {
-
-        const uptime =
-            Math.floor(
-                process.uptime()
-            )
-
-        const hours =
-            Math.floor(
-                uptime / 3600
-            )
-
-        const minutes =
-            Math.floor(
-                (uptime % 3600) / 60
-            )
-
-        const seconds =
-            uptime % 60
-
-        if (
-            activeConn
-        ) {
-
-            console.log(
-                chalk.dim(
-                    `[HEARTBEAT] ${hours}h${minutes}m${seconds}s | 🟢 connected | MongoDB: ${mongoDb ? 'ready' : 'offline'}`
-                )
-            )
-
-        } else {
-
-            console.log(
-                chalk.dim(
-                    `[HEARTBEAT] ${hours}h${minutes}m${seconds}s | 🔴 disconnected | reconnects: ${reconnectAttempts}`
-                )
-            )
-        }
-
-    },
-
-    5 * 60 * 1000
-)
